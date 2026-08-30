@@ -126,6 +126,18 @@ function clampSettings( S ) {
 		} );
 	}
 
+	/* The garment never reaches the engine, but it does reach fillStyle, and a
+	   colour string canvas cannot parse is ignored silently - leaving the last
+	   good colour on screen while the panel claims a different one. Clamped for
+	   the same reason as the ink, just a different way of being wrong. */
+	if ( ! Array.isArray( out.shirt ) || 3 !== out.shirt.length ) {
+		out.shirt = [ 0, 0, 0 ];
+	} else {
+		out.shirt = out.shirt.map( function ( v ) {
+			return Math.min( 255, Math.max( 0, Math.round( Number( v ) || 0 ) ) );
+		} );
+	}
+
 	return out;
 }
 

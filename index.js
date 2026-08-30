@@ -232,6 +232,8 @@ $( 'reset' ).addEventListener( 'click', () => {
 	S = studio.defaults();
 	toScreen();
 	markSwatches();
+	markGarments();
+	repaint();
 	say( 'status', 'Back to the defaults.' );
 } );
 
@@ -268,6 +270,24 @@ document.addEventListener( 'change', ( e ) => {
 	S[ k ] = rgb;
 	el.value = toHex( rgb );
 	markSwatches();
+	markGarments();
+
+	/* The garment is drawn behind the artwork, so a new colour only needs the
+	   picture drawn again - not the engine run again. Re-running would take
+	   seconds on the main thread to produce identical pixels. */
+	if ( 'shirt' === k ) {
+		repaint();
+	}
+} );
+
+/* The garment switch is the one control whose effect is entirely in the
+   preview, so it repaints on the spot instead of waiting for the next run. */
+document.addEventListener( 'change', ( e ) => {
+	if ( e.target && e.target.getAttribute &&
+		'shirtPreview' === e.target.getAttribute( 'data-k' ) ) {
+		markGarments();
+		repaint();
+	}
 } );
 
 /* ------------------------------------------------------------------ */
@@ -323,8 +343,81 @@ function buildSwatches() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Garment colours                                                     */
+/* ------------------------------------------------------------------ */
+
+/* Stock blank-garment colours. Same list and same values as the website, so a
+   job set up in one and finished in the other looks the same. */
+const GARMENTS = [
+	{ name: 'White', hex: '#ffffff' },
+	{ name: 'Natural', hex: '#e8dfc8' },
+	{ name: 'Ash', hex: '#d2d3d0' },
+	{ name: 'Sport grey', hex: '#b0b2ae' },
+	{ name: 'Charcoal', hex: '#4a4e53' },
+	{ name: 'Black', hex: '#101010' },
+	{ name: 'Navy', hex: '#1b2a44' },
+	{ name: 'Royal', hex: '#1d4f91' },
+	{ name: 'Sky', hex: '#84b6dd' },
+	{ name: 'Bottle green', hex: '#1c4b3c' },
+	{ name: 'Red', hex: '#b5202e' },
+	{ name: 'Maroon', hex: '#6a2431' },
+	{ name: 'Purple', hex: '#4b2e83' },
+	{ name: 'Pink', hex: '#f0a7bf' },
+	{ name: 'Yellow', hex: '#f2cf3f' },
+	{ name: 'Orange', hex: '#e35205' }
+];
+
+function markGarments() {
+	const now = toHex( S.shirt ).toLowerCase();
+
+	Array.from( document.querySelectorAll( '#garments button' ) ).forEach( ( b ) => {
+		const on = S.shirtPreview && b.getAttribute( 'data-g' ) === now;
+
+		b.className = on ? 'swatch is-on' : 'swatch';
+		b.setAttribute( 'aria-pressed', on ? 'true' : 'false' );
+	} );
+}
+
+function buildGarments() {
+	const wrap = $( 'garments' );
+
+	GARMENTS.forEach( ( g ) => {
+		const b = document.createElement( 'button' );
+
+		b.type = 'button';
+		b.className = 'swatch';
+		b.title = g.name;
+		b.setAttribute( 'aria-label', 'Preview on a ' + g.name.toLowerCase() + ' garment' );
+		b.setAttribute( 'data-g', g.hex );
+		b.style.backgroundColor = g.hex;
+
+		b.addEventListener( 'click', () => {
+			S.shirt = fromHex( g.hex );
+			$( 'shirt-hex' ).value = g.hex;
+
+			/* Setting the colour without switching the preview on would look
+			   like the button did nothing, which is the whole reason the row
+			   is here rather than just the hex box. */
+			S.shirtPreview = true;
+			document.querySelector( '[data-k="shirtPreview"]' ).checked = true;
+
+			markGarments();
+			repaint();
+		} );
+
+		wrap.appendChild( b );
+	} );
+
+	markGarments();
+}
+
+/* ------------------------------------------------------------------ */
 /* Preview                                                             */
 /* ------------------------------------------------------------------ */
+
+/* The last thing Preview produced, kept so the garment colour can be changed
+   without running the engine again. */
+let lastPreview = null;
 
 /* Drawn behind the artwork so transparency is visible as transparency.
    Without it, white ink on the panel's own background is white on grey and
@@ -364,6 +457,38 @@ function layer( data, w, h ) {
 	cx.putImageData( img, 0, 0 );
 
 	return c;
+}
+
+/* How much of the result you can see through. Nothing transparent means the
+   artwork is covering the garment completely - correct, and indistinguishable
+   from a broken button unless it is said out loud. */
+function countClear( data ) {
+	let n = 0;
+
+	for ( let i = 3; i < data.length; i += 4 ) {
+		if ( 0 === data[ i ] ) {
+			n++;
+		}
+	}
+
+	return n;
+}
+
+function garmentNote() {
+	const note = $( 'garment-note' );
+	const hide = ! S.shirtPreview || ! lastPreview || lastPreview.clear > 0;
+
+	note.classList.toggle( 'hidden', hide );
+}
+
+/* Draw the last preview again with whatever the garment is now. Cheap on
+   purpose: no engine, no document read. */
+function repaint() {
+	garmentNote();
+
+	if ( lastPreview ) {
+		paintPreview( lastPreview );
+	}
 }
 
 function paintPreview( r ) {
@@ -418,6 +543,10 @@ $( 'preview' ).addEventListener( 'click', () => {
 			} );
 		} )
 		.then( ( r ) => {
+			r.clear = countClear( r.data );
+			lastPreview = r;
+
+			garmentNote();
 			paintPreview( r );
 			say( 'pv-msg', r.width + ' x ' + r.height + ' preview' +
 				( S.inkEnabled ? ' in ' + toHex( S.ink ) : '' ), 'ok' );
@@ -494,5 +623,6 @@ try {
 }
 
 buildSwatches();
+buildGarments();
 toScreen();
 start();

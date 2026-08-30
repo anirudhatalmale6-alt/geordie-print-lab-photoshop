@@ -36,12 +36,20 @@
 		<canvas id="pv" width="260" height="180"></canvas>
 		<p id="pv-msg" class="msg small dim">Press Preview to see the result.</p>
 		<div class="actions">
-			<button id="preview">Preview</button>
-			<label class="row row--tight">Garment
-				<input type="checkbox" data-k="shirtPreview">
-				<input id="shirt-hex" type="text" class="hex" data-hex="shirt" spellcheck="false" maxlength="7">
-			</label>
+			<button id="preview" class="primary">Preview</button>
 		</div>
+
+		<!-- Directly under the preview, because it is a thing you do TO the
+		     preview. Buried in a section it reads as another print setting,
+		     which is what got it mistaken for the ink colour. -->
+		<p class="cap">Garment colour</p>
+		<label class="row"><input type="checkbox" data-k="shirtPreview"> Show it on a garment</label>
+		<div id="garments" class="swatches"></div>
+		<label class="row">Colour
+			<input id="shirt-hex" type="text" class="hex" data-hex="shirt" spellcheck="false" maxlength="7">
+		</label>
+		<p id="garment-note" class="msg small warn hidden">This artwork has no see-through areas yet, so it is covering the garment. Knock the background out or screen it first.</p>
+		<p class="dim small">The colour of the shirt you are printing on. On screen only - it is never written into your document.</p>
 	</div>
 
 	<details open>

@@ -89,7 +89,7 @@ check( 'the web engine key list was found (' + wk.length + ' keys)', wk.length >
 
 /* Every key the engine is sent must exist in both default sets, with the same
    value. Keys the web app has and the plugin does not are fine - the plugin
-   has no upscaler and no shirt preview - but a shared key that DISAGREES is a
+   has no upscaler - but a shared key that DISAGREES is a
    customer getting two different results from the same numbers. */
 const shared = studio.ENGINE_KEYS.filter( ( k ) => k in wd );
 check( 'the plugin sends the same keys the website does', studio.ENGINE_KEYS.length === wk.length &&
@@ -524,6 +524,31 @@ check( 'a broken ink falls back to black', JSON.stringify( inks.ink ) === '[0,0,
 const outOfRange = studio.clampSettings( Object.assign( studio.defaults(), { ink: [ 999, -40, 12.6 ] } ) );
 check( 'ink channels are brought into range', JSON.stringify( outOfRange.ink ) === '[255,0,13]' );
 
+const shirts = studio.clampSettings( Object.assign( studio.defaults(), { shirt: 'not a colour' } ) );
+check( 'a broken garment colour falls back to black', JSON.stringify( shirts.shirt ) === '[0,0,0]' );
+
+const shirtRange = studio.clampSettings( Object.assign( studio.defaults(), { shirt: [ 300, -1, 7.4 ] } ) );
+check( 'garment channels are brought into range', JSON.stringify( shirtRange.shirt ) === '[255,0,7]' );
+
+section( 'the garment colour is preview only' );
+
+/* The claim printed on the panel, checked rather than trusted. If shirt ever
+   reached the engine this would fail, and the failure would be a customer
+   printing a navy rectangle. */
+check( 'the garment is not one of the settings the engine is given',
+	studio.ENGINE_KEYS.indexOf( 'shirt' ) === -1 &&
+	studio.ENGINE_KEYS.indexOf( 'shirtPreview' ) === -1 );
+
+const withShirt = studio.settingsForEngine( studio.clampSettings( Object.assign(
+	studio.defaults(), { shirtPreview: true, shirt: [ 27, 42, 68 ] }
+) ) );
+check( 'and it is absent from what is actually sent',
+	! ( 'shirt' in withShirt ) && ! ( 'shirtPreview' in withShirt ) );
+
+const noShirt = studio.settingsForEngine( studio.clampSettings( studio.defaults() ) );
+check( 'so the engine is handed the same job with a garment set or not',
+	JSON.stringify( withShirt ) === JSON.stringify( noShirt ) );
+
 /* ------------------------------------------------------------------ */
 
 Promise.all( run ).then( () => {
@@ -531,8 +556,8 @@ Promise.all( run ).then( () => {
 
 	/* A floor. A test file that stops running looks exactly like one that
 	   passes, and this one is full of async blocks that could silently vanish. */
-	if ( total < 81 ) {
-		fails.push( 'only ' + total + ' checks ran, expected at least 81' );
+	if ( total < 86 ) {
+		fails.push( 'only ' + total + ' checks ran, expected at least 86' );
 	}
 
 	console.log( '\n' + ( fails.length ? fails.length + ' FAILED of ' + total : 'ALL ' + ok + ' PASSED' ) );

@@ -290,6 +290,61 @@ with sync_playwright() as p:
     }""")
     check("turning the ink off repaints without it (%d px left)" % after, after < painted["ink"] / 4)
 
+    # --- garment colour --------------------------------------------------
+    #
+    # Counting a specific colour on the canvas, because "the checkbox is
+    # ticked" would pass on a backdrop that was never drawn.
+    def count(rgb):
+        return pg.evaluate("""(c) => {
+            const cv = document.getElementById('pv');
+            const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+            let n = 0;
+            for (let i = 0; i < d.length; i += 4) {
+                if (d[i] === c[0] && d[i+1] === c[1] && d[i+2] === c[2] && d[i+3] === 255) n++;
+            }
+            return n;
+        }""", list(rgb))
+
+    NAVY, ROYAL = (0x1b, 0x2a, 0x44), (0x1d, 0x4f, 0x91)
+
+    check("there is a row of garment colours (%d)" %
+          pg.evaluate("() => document.querySelectorAll('#garments button').length"),
+          pg.evaluate("() => document.querySelectorAll('#garments button').length") == 16)
+    check("none is chosen until one is pressed",
+          pg.evaluate("() => document.querySelectorAll('#garments .is-on').length") == 0)
+    check("and no garment is showing yet (%d navy px)" % count(NAVY), count(NAVY) == 0)
+
+    pg.evaluate("() => window.__calls.length = 0")
+    pg.click('#garments button[data-g="#1b2a44"]')
+    pg.wait_for_timeout(400)
+
+    check("one press paints the garment behind the artwork (%d navy px)" % count(NAVY),
+          count(NAVY) > 500)
+    check("  and it did not have to run the engine again to do it",
+          pg.evaluate("() => window.__calls.length") == 0)
+    check("the switch came on by itself", pg.is_checked('[data-k="shirtPreview"]'))
+    check("the hex box followed the swatch", pg.input_value("#shirt-hex").lower() == "#1b2a44")
+    check("exactly one garment shows as chosen",
+          pg.evaluate("() => document.querySelectorAll('#garments .is-on').length") == 1)
+
+    # A second colour, so the first is not a constant.
+    pg.click('#garments button[data-g="#1d4f91"]')
+    pg.wait_for_timeout(400)
+    check("a second colour replaces the first (%d royal, %d navy left)"
+          % (count(ROYAL), count(NAVY)),
+          count(ROYAL) > 500 and count(NAVY) == 0)
+
+    # The claim printed under the control.
+    check("changing the garment never writes to the document",
+          pg.evaluate("() => window.__calls.filter(c => c.putPixels).length") == 0)
+
+    pg.uncheck('[data-k="shirtPreview"]')
+    pg.wait_for_timeout(400)
+    check("switching it off takes the garment away (%d royal left)" % count(ROYAL),
+          count(ROYAL) == 0)
+    check("and no garment is marked once it is off",
+          pg.evaluate("() => document.querySelectorAll('#garments .is-on').length") == 0)
+
     # --- a lapsed membership mid-session -------------------------------
     pg.evaluate("() => { window.__licenceReply = { valid: false, reason: 'membership_inactive' }; }")
     pg.evaluate("() => window.__calls.length = 0")
