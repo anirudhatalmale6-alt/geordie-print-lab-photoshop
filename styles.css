@@ -1,0 +1,191 @@
+/*
+ * Panel styling.
+ *
+ * Photoshop's panels are dark, and a panel that ignores that reads as broken
+ * rather than as branded - so this follows the host, unlike the web app which
+ * follows the shop. The blue is the shop's own.
+ */
+
+:root {
+	--ink: #f2f3f5;
+	--dim: #a8adb7;
+	--line: #4a4d53;
+	--panel: #323438;
+	--field: #23252a;
+	/* The shop's blue, taken a shade darker than the website's so that white
+	   11px button text clears 4.5:1 on it - measured, #2b6fdd came out at
+	   4.28 and this is 5.8. */
+	--brand: #2160c4;
+	--warn: #e8a33d;
+	--ok: #55c08a;
+	--bg: #2b2d31;
+}
+
+body {
+	margin: 0;
+	padding: 10px;
+	font-size: 11px;
+	color: var(--ink);
+	font-family: sans-serif;
+
+	/* Set explicitly rather than inherited from the host.
+	   Photoshop's panels are usually dark, but the host theme is the
+	   customer's choice - and with no background of our own, a light theme
+	   would paint this panel's light text onto a light panel and every word
+	   on it would disappear. Owning the background means the contrast
+	   figures below are true whatever theme they run. */
+	background: var(--bg);
+}
+
+.screen {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.hidden {
+	display: none;
+}
+
+h1 {
+	margin: 0;
+	font-size: 14px;
+	font-weight: 700;
+}
+
+.dim {
+	color: var(--dim);
+}
+
+.small {
+	font-size: 10px;
+}
+
+.warn {
+	color: var(--warn);
+}
+
+.ok {
+	color: var(--ok);
+}
+
+.msg {
+	margin: 2px 0;
+	min-height: 13px;
+	line-height: 1.35;
+}
+
+/* --- the gate ---------------------------------------------------- */
+
+#gate {
+	align-items: center;
+	text-align: center;
+	padding-top: 14px;
+}
+
+#gate-logo {
+	width: 150px;
+	height: auto;
+}
+
+#key {
+	width: 100%;
+	text-align: center;
+	letter-spacing: 0.04em;
+}
+
+/* --- controls ---------------------------------------------------- */
+
+details {
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	padding: 4px 7px;
+	background: var(--panel);
+}
+
+summary {
+	cursor: pointer;
+	font-weight: 700;
+	padding: 2px 0;
+}
+
+.row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 0;
+	color: var(--dim);
+}
+
+.row input[type="range"] {
+	flex: 1;
+	min-width: 40px;
+}
+
+.row input[type="number"],
+.row select {
+	margin-left: auto;
+	min-width: 96px;
+}
+
+.row output {
+	width: 34px;
+	text-align: right;
+	color: var(--ink);
+}
+
+input,
+select,
+button {
+	font-size: 11px;
+	color: var(--ink);
+	background: var(--field);
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	padding: 3px 6px;
+}
+
+button {
+	cursor: pointer;
+}
+
+button.primary {
+	background: var(--brand);
+	border-color: var(--brand);
+	font-weight: 700;
+	padding: 6px 10px;
+}
+
+button.link {
+	background: none;
+	border: none;
+	color: var(--dim);
+	text-decoration: underline;
+	padding: 0;
+}
+
+button:disabled {
+	opacity: 0.55;
+}
+
+.actions {
+	display: flex;
+	gap: 6px;
+}
+
+.actions .primary {
+	flex: 1;
+}
+
+.bar,
+.foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.foot {
+	border-top: 1px solid var(--line);
+	padding-top: 6px;
+}

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- The locked door. Shown until a key checks out. -->
+<div id="gate" class="screen">
+	<img id="gate-logo" src="icons/logo.png" alt="Geordie Print Lab">
+	<p class="dim">Paste the key from your membership page.</p>
+
+	<input id="key" type="text" placeholder="GPL-XXXXX-XXXXX-XXXXX-XXXXX" spellcheck="false">
+	<button id="unlock" class="primary">Unlock</button>
+
+	<p id="gate-msg" class="msg"></p>
+	<p class="dim small">Your key is on geordieprintco.co.uk, on your membership page.</p>
+</div>
+
+<!-- The tool. -->
+<div id="tool" class="screen hidden">
+
+	<div class="bar">
+		<span id="doc" class="dim small">No document</span>
+	</div>
+
+	<details open>
+		<summary>Halftone</summary>
+		<label class="row"><input type="checkbox" data-k="halftone"> Screen the artwork</label>
+		<label class="row">Output DPI <input type="number" data-k="dpi" min="72" max="2400" step="1"></label>
+		<label class="row">LPI <input type="range" data-k="lpi" min="5" max="120" step="1"><output data-o="lpi"></output></label>
+		<label class="row">Angle <input type="range" data-k="angle" min="0" max="90" step="0.5"><output data-o="angle"></output></label>
+		<label class="row">Shape
+			<select data-k="shape">
+				<option value="round">Round</option>
+				<option value="ellipse">Ellipse</option>
+				<option value="square">Square</option>
+				<option value="line">Line</option>
+			</select>
+		</label>
+		<label class="row">Screen from
+			<select data-k="screenSource">
+				<option value="dark">Dark areas</option>
+				<option value="luma">Brightness</option>
+			</select>
+		</label>
+	</details>
+
+	<details>
+		<summary>Adjustments</summary>
+		<label class="row"><input type="checkbox" data-k="adjEnabled"> Enable</label>
+		<label class="row">Black <input type="range" data-k="adjBlack" min="0" max="254" step="1"><output data-o="adjBlack"></output></label>
+		<label class="row">Gamma <input type="range" data-k="adjGamma" min="0.1" max="3" step="0.05"><output data-o="adjGamma"></output></label>
+		<label class="row">White <input type="range" data-k="adjWhite" min="1" max="255" step="1"><output data-o="adjWhite"></output></label>
+		<label class="row">Hue <input type="range" data-k="hue" min="-180" max="180" step="1"><output data-o="hue"></output></label>
+		<label class="row">Saturation <input type="range" data-k="saturation" min="-100" max="100" step="1"><output data-o="saturation"></output></label>
+		<label class="row">Lightness <input type="range" data-k="lightness" min="-100" max="100" step="1"><output data-o="lightness"></output></label>
+	</details>
+
+	<details>
+		<summary>Background</summary>
+		<label class="row"><input type="checkbox" data-k="bgRemove"> Knock the background out</label>
+		<label class="row">Tolerance <input type="range" data-k="bgTolerance" min="0" max="120" step="1"><output data-o="bgTolerance"></output></label>
+		<label class="row">Softness <input type="range" data-k="bgSoftness" min="0" max="60" step="1"><output data-o="bgSoftness"></output></label>
+	</details>
+
+	<details>
+		<summary>Levels</summary>
+		<label class="row"><input type="checkbox" data-k="levelsEnabled"> Enable</label>
+		<label class="row">In black <input type="range" data-k="inBlack" min="0" max="254" step="1"><output data-o="inBlack"></output></label>
+		<label class="row">In gamma <input type="range" data-k="inGamma" min="0.1" max="3" step="0.05"><output data-o="inGamma"></output></label>
+		<label class="row">In white <input type="range" data-k="inWhite" min="1" max="255" step="1"><output data-o="inWhite"></output></label>
+		<label class="row">Out black <input type="range" data-k="outBlack" min="0" max="254" step="1"><output data-o="outBlack"></output></label>
+		<label class="row">Out white <input type="range" data-k="outWhite" min="1" max="255" step="1"><output data-o="outWhite"></output></label>
+	</details>
+
+	<details>
+		<summary>Cleanup</summary>
+		<label class="row">Micro dot <input type="range" data-k="microDot" min="0" max="10" step="1"><output data-o="microDot"></output></label>
+		<label class="row">Intensity <input type="range" data-k="cleanupIntensity" min="0" max="10" step="1"><output data-o="cleanupIntensity"></output></label>
+	</details>
+
+	<details>
+		<summary>Underbase</summary>
+		<label class="row"><input type="checkbox" data-k="underbase"> Build an underbase</label>
+		<label class="row">Choke <input type="range" data-k="choke" min="0" max="20" step="1"><output data-o="choke"></output></label>
+	</details>
+
+	<div class="actions">
+		<button id="apply" class="primary">Apply to layer</button>
+		<button id="reset">Reset</button>
+	</div>
+
+	<p id="status" class="msg"></p>
+
+	<div class="foot">
+		<span id="plan" class="dim small"></span>
+		<button id="signout" class="link">Sign out</button>
+	</div>
+</div>
+
+<script src="index.js"></script>
+</body>
+</html>

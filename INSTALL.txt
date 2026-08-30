@@ -1,0 +1,62 @@
+GEORDIE PRINT LAB - PHOTOSHOP PLUGIN
+Installing it
+=====================================
+
+You need Photoshop 2023 or newer.
+
+
+FOR TESTING IT YOURSELF (a few minutes)
+---------------------------------------
+
+1. Install the UXP Developer Tool. It is free and comes with your
+   Creative Cloud subscription - open the Creative Cloud desktop app,
+   search "UXP Developer Tool", install it.
+
+2. Open Photoshop, and leave it open.
+
+3. Open the UXP Developer Tool and click "Add Plugin".
+
+4. Point it at the manifest.json file in this folder.
+
+5. The plugin appears in the list. Click the "..." next to it and
+   choose "Load". It is now in Photoshop.
+
+6. In Photoshop: Plugins menu > Geordie Print Lab.
+
+7. Paste your key from your membership page and press Unlock.
+
+Open an image, pick a normal layer, tick "Screen the artwork", press
+"Apply to layer". Ctrl+Z / Cmd+Z undoes it in one go.
+
+
+FOR GIVING IT TO CUSTOMERS
+--------------------------
+
+Customers cannot use the developer tool - they need a packaged file.
+
+1. In the UXP Developer Tool, next to the plugin, choose "Package".
+   It produces a .ccx file.
+
+2. That .ccx is the file you send them. They double click it and
+   Creative Cloud installs it.
+
+3. They open Plugins > Geordie Print Lab and paste their key.
+
+The .ccx has to be built on a machine with Photoshop and your Adobe
+account signed in, which is why this is the one step I cannot do for
+you. It takes about a minute once the developer tool is installed.
+
+
+IF SOMETHING IS WRONG
+---------------------
+
+The plugin refuses to work on some documents on purpose, and says why:
+
+- CMYK or greyscale documents. Image > Mode > RGB Color.
+- 16 or 32 bit documents. Image > Mode > 8 Bits/Channel.
+- Text, shape and smart object layers. Right click > Rasterise.
+- Locked layers.
+
+If the key will not unlock, the message says which of the reasons it
+is - not recognised, membership not active, or already on two
+computers.
