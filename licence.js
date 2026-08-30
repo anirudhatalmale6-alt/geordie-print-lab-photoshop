@@ -221,6 +221,8 @@ function explain( reason ) {
 		unknown_key: 'That key was not recognised. Check it against the one on your membership page.',
 		membership_inactive: 'Your membership is not active at the moment, so the plugin is switched off. It will come back on by itself once a payment goes through.',
 		too_many_installs: 'This key is already in use on two computers. Sign out of one on your membership page, then try again.',
+		key_revoked: 'That key has been switched off by Geordie Print Co. Get in touch with them if that is not what you expected.',
+		key_expired: 'That key has run out. Get in touch with Geordie Print Co if you need it extending.',
 		too_many_attempts: 'Too many tries in a short space of time. Give it a quarter of an hour and try again.',
 		malformed: 'That does not look like a Print Lab key. They look like GPL-XXXXX-XXXXX-XXXXX-XXXXX.',
 		timeout: 'The shop did not answer in time.',

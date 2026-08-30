@@ -495,6 +495,18 @@ run.push( ( async () => {
 		res.underbase === true && !! res.underbaseData );
 } )() );
 
+section( 'what the customer is told they are on' );
+
+/* A key given away for nothing is not a monthly membership. Telling somebody
+   with free lifetime access that they are on a monthly plan "paid to" nothing
+   is both wrong and a support call. */
+check( 'a lapsed-reason string exists for a revoked key',
+	licence.explain( 'key_revoked' ).indexOf( 'switched off' ) !== -1 );
+check( 'and for an expired one',
+	licence.explain( 'key_expired' ).indexOf( 'run out' ) !== -1 );
+check( 'neither leaks the reason code',
+	[ 'key_revoked', 'key_expired' ].every( ( r ) => licence.explain( r ).indexOf( '_' ) === -1 ) );
+
 section( 'settings are bounded' );
 
 const wild = studio.clampSettings( Object.assign( studio.defaults(), {
@@ -519,8 +531,8 @@ Promise.all( run ).then( () => {
 
 	/* A floor. A test file that stops running looks exactly like one that
 	   passes, and this one is full of async blocks that could silently vanish. */
-	if ( total < 68 ) {
-		fails.push( 'only ' + total + ' checks ran, expected at least 68' );
+	if ( total < 81 ) {
+		fails.push( 'only ' + total + ' checks ran, expected at least 81' );
 	}
 
 	console.log( '\n' + ( fails.length ? fails.length + ' FAILED of ' + total : 'ALL ' + ok + ' PASSED' ) );

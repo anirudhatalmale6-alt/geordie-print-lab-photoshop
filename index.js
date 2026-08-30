@@ -156,13 +156,28 @@ function enterTool( info ) {
 	describeDoc();
 
 	if ( info ) {
-		if ( info.trial ) {
-			$( 'plan' ).textContent = 'Free trial, ends ' + ( info.expires || 'soon' );
-		} else {
-			$( 'plan' ).textContent = ( 'year' === info.plan ? 'Yearly' : 'Monthly' ) +
-				' membership' + ( info.expires ? ', paid to ' + info.expires : '' );
-		}
+		$( 'plan' ).textContent = planLine( info );
 	}
+}
+
+/* What the customer is actually on. Written out in full rather than assuming
+   everyone is a paying member - a key given away for nothing is not a monthly
+   membership, and saying so would be both wrong and slightly insulting. */
+function planLine( info ) {
+	if ( info.trial ) {
+		return 'Free trial, ends ' + ( info.expires || 'soon' );
+	}
+
+	if ( 'lifetime' === info.plan ) {
+		return 'Lifetime access';
+	}
+
+	if ( 'free' === info.plan ) {
+		return 'Free access' + ( info.expires ? ', until ' + info.expires : '' );
+	}
+
+	return ( 'year' === info.plan ? 'Yearly' : 'Monthly' ) + ' membership' +
+		( info.expires ? ', paid to ' + info.expires : '' );
 }
 
 /* ------------------------------------------------------------------ */
