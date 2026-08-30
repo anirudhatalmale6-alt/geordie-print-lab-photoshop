@@ -37,6 +37,14 @@ function defaults() {
 		shape: 'round',
 		screenSource: 'dark',
 
+		inkEnabled: false,
+		ink: [ 0, 0, 0 ],
+
+		/* Preview only - never sent to the engine, never printed. Same names
+		   and same values as the web app so the two read alike. */
+		shirt: [ 0, 0, 0 ],
+		shirtPreview: false,
+
 		levelsEnabled: false,
 		inBlack: 5,
 		inGamma: 1,
@@ -61,6 +69,7 @@ var ENGINE_KEYS = [
 	'knockout',
 	'bgRemove', 'bgTolerance', 'bgSoftness',
 	'halftone', 'lpi', 'angle', 'shape', 'screenSource',
+	'inkEnabled', 'ink',
 	'levelsEnabled', 'inBlack', 'inGamma', 'inWhite', 'outBlack', 'outWhite',
 	'microDot', 'cleanupIntensity',
 	'underbase', 'choke'
@@ -105,6 +114,18 @@ function clampSettings( S ) {
 		out.knockout = [ 0, 0, 0 ];
 	}
 
+	/* The engine writes ink straight into the pixel buffer, so a malformed
+	   value here would paint undefined - which clamps to 0 and silently prints
+	   black instead of refusing. Falling back to black is the same colour, but
+	   deliberately rather than by accident. */
+	if ( ! Array.isArray( out.ink ) || 3 !== out.ink.length ) {
+		out.ink = [ 0, 0, 0 ];
+	} else {
+		out.ink = out.ink.map( function ( v ) {
+			return Math.min( 255, Math.max( 0, Math.round( Number( v ) || 0 ) ) );
+		} );
+	}
+
 	return out;
 }
 
@@ -116,17 +137,20 @@ function clampSettings( S ) {
 var PREVIEW_MAX_SIDE = 900;
 
 /**
- * Run the pipeline over the active layer.
+ * The half that Apply and Preview have in common: check, read, run.
  *
- * @param {Object} deps  bridge, engine
- * @param {Object} S     settings
- * @param {Object} opts  { preview: bool, onStage: fn }
+ * Deliberately one function. A preview that ran different code from Apply
+ * would be a picture of something else, and the whole value of a preview is
+ * that it is not.
+ *
+ * @param {Object}   deps     bridge, engine
+ * @param {Object}   S        settings
+ * @param {number}   maxSide  longest edge to read, 0 for full size
+ * @param {Function} say      progress reporter
  */
-function apply( deps, S, opts ) {
+function process( deps, S, maxSide, say ) {
 	var bridge = deps.bridge;
 	var engine = deps.engine;
-	var options = opts || {};
-	var say = options.onStage || function () {};
 
 	if ( ! engine || 1 !== engine.ENGINE_API ) {
 		return Promise.reject( new Error(
@@ -144,8 +168,8 @@ function apply( deps, S, opts ) {
 
 	say( 'Reading the layer' );
 
-	return bridge.read( options.preview ? PREVIEW_MAX_SIDE : 0 ).then( function ( frame ) {
-		say( options.preview ? 'Building the preview' : 'Working' );
+	return bridge.read( maxSide ).then( function ( frame ) {
+		say( 'Working' );
 
 		engine.run(
 			frame.data,
@@ -155,30 +179,74 @@ function apply( deps, S, opts ) {
 			frame.scale
 		);
 
-		if ( ! settings.underbase ) {
-			say( 'Writing it back' );
+		var under = null;
 
-			return bridge.write( frame, 'Print Lab' ).then( function () {
-				return { width: frame.width, height: frame.height, scale: frame.scale, underbase: false };
-			} );
+		if ( settings.underbase ) {
+			/* The underbase is measured in pixels, so like the halftone cell
+			   it has to be scaled with the proxy or the preview lies about
+			   the file. */
+			under = engine.buildUnderbase(
+				frame.data,
+				frame.width,
+				frame.height,
+				Math.max( 0, Math.round( settings.choke * frame.scale ) )
+			);
 		}
 
-		/* The underbase is measured in pixels, so like the halftone cell it
-		   has to be scaled with the proxy or the preview lies about the file. */
-		var choke = Math.max( 0, Math.round( settings.choke * frame.scale ) );
-		var under = engine.buildUnderbase( frame.data, frame.width, frame.height, choke );
+		return { frame: frame, settings: settings, under: under };
+	} );
+}
 
+/**
+ * Run the pipeline over the active layer and write the result back.
+ *
+ * @param {Object} deps  bridge, engine
+ * @param {Object} S     settings
+ * @param {Object} opts  { onStage: fn }
+ */
+function apply( deps, S, opts ) {
+	var options = opts || {};
+	var say = options.onStage || function () {};
+
+	return process( deps, S, 0, say ).then( function ( r ) {
 		say( 'Writing it back' );
 
-		return bridge.write( frame, 'Print Lab' ).then( function () {
+		return deps.bridge.write( r.frame, 'Print Lab' ).then( function () {
 			return {
-				width: frame.width,
-				height: frame.height,
-				scale: frame.scale,
-				underbase: true,
-				underbaseData: under
+				width: r.frame.width,
+				height: r.frame.height,
+				scale: r.frame.scale,
+				underbase: !! r.under,
+				underbaseData: r.under
 			};
 		} );
+	} );
+}
+
+/**
+ * The same pipeline at preview size, WITHOUT writing to the document.
+ *
+ * This is the whole point of it being separate from apply(): looking at what
+ * an ink colour is going to do should not put a step in anyone's history, and
+ * should not have to be undone if the answer is no.
+ *
+ * @param {Object} deps  bridge, engine
+ * @param {Object} S     settings
+ * @param {Object} opts  { onStage: fn }
+ */
+function preview( deps, S, opts ) {
+	var options = opts || {};
+	var say = options.onStage || function () {};
+
+	return process( deps, S, PREVIEW_MAX_SIDE, say ).then( function ( r ) {
+		return {
+			width: r.frame.width,
+			height: r.frame.height,
+			scale: r.frame.scale,
+			data: r.frame.data,
+			underbase: !! r.under,
+			underbaseData: r.under
+		};
 	} );
 }
 
@@ -188,5 +256,6 @@ module.exports = {
 	settingsForEngine: settingsForEngine,
 	clampSettings: clampSettings,
 	PREVIEW_MAX_SIDE: PREVIEW_MAX_SIDE,
-	apply: apply
+	apply: apply,
+	preview: preview
 };

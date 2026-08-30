@@ -160,9 +160,23 @@ with sync_playwright() as p:
     check("every control maps to a real setting" + (" (%s)" % unknown if unknown else ""), not unknown)
     check("%d controls on the panel" % len(keys), len(keys) >= 20)
 
-    # A control the engine never reads is a dial that does nothing.
-    inert = [k for k in keys if k not in engine_keys]
+    # A control nothing reads is a dial that does nothing. Most feed the
+    # engine; a few are the panel's own (the garment colour behind the
+    # preview is never printed, so the engine must never see it). Both count
+    # as wired - being read by NEITHER does not.
+    panel_src = open(os.path.join(ROOT, "index.js"), encoding="utf-8").read()
+    inert = [
+        k for k in keys
+        if k not in engine_keys
+        and not re.search(r"\bS\.%s\b" % re.escape(k), panel_src)
+    ]
     check("no control is inert" + (" (%s)" % inert if inert else ""), not inert)
+
+    # The colour boxes are not data-k, so they would slip past the sweep above.
+    hex_keys = pg.eval_on_selector_all(
+        "[data-hex]", "els => els.map(e => e.getAttribute('data-hex'))")
+    check("%d colour boxes, all real settings" % len(hex_keys),
+          len(hex_keys) >= 2 and all(k in defaults for k in hex_keys))
 
     # --- the gate ------------------------------------------------------
     # It opened with a good stubbed reply and no stored key, so it should be
@@ -208,6 +222,73 @@ with sync_playwright() as p:
     pg.wait_for_timeout(2500)
     plain = pg.evaluate("() => (window.__calls.find(c => c.create) || {}).sum")
     check("turning the halftone off produces different pixels", checksum != plain)
+
+    # --- ink colour and the preview ------------------------------------
+    pg.check('[data-k="halftone"]')
+    pg.check('[data-k="inkEnabled"]')
+
+    # The setting itself is module-private, and rather than open a hole in the
+    # plugin to look at it, every claim below is checked where it shows: on
+    # the box, on the swatch, and finally in the painted pixels.
+    pg.click('#swatches button[data-ink="#c8102e"]')
+    check("a swatch fills the hex box", pg.input_value("#ink-hex").lower() == "#c8102e")
+    check("and exactly one swatch shows as chosen",
+          pg.evaluate("() => document.querySelectorAll('#swatches .is-on').length") == 1)
+
+    # Deliberately a colour that is NOT one of the swatches, so the
+    # selection has something to clear.
+    pg.fill("#ink-hex", "#7a2f8a")
+    pg.dispatch_event("#ink-hex", "change")
+    check("typing a colour outside the swatches clears the selection",
+          pg.evaluate("() => document.querySelectorAll('#swatches .is-on').length") == 0)
+
+    # A half-typed hex must be refused outright. Accepting "#12" as some
+    # colour would print something nobody picked.
+    pg.fill("#ink-hex", "#12")
+    pg.dispatch_event("#ink-hex", "change")
+    check("a half-typed hex is rejected and the box put back",
+          pg.input_value("#ink-hex").lower() == "#7a2f8a")
+
+    pg.evaluate("() => window.__calls.length = 0")
+    pg.click("#preview")
+    pg.wait_for_timeout(2500)
+
+    check("preview reads the layer", pg.evaluate("() => window.__calls.filter(c => c.getPixels).length") == 1)
+    # The whole point of preview being separate from apply.
+    check("preview writes nothing to the document",
+          pg.evaluate("() => window.__calls.filter(c => c.putPixels).length") == 0)
+
+    # Measure the canvas rather than trusting the status line: count the
+    # pixels actually painted in the chosen ink.
+    painted = pg.evaluate("""() => {
+        const c = document.getElementById('pv');
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        let ink = 0, other = 0;
+        for (let i = 0; i < d.length; i += 4) {
+            if (d[i] === 122 && d[i+1] === 47 && d[i+2] === 138) ink++;
+            else other++;
+        }
+        return { ink, other };
+    }""")
+    check("the preview canvas is painted in the chosen ink (%d px)" % painted["ink"],
+          painted["ink"] > 200)
+    check("and it is not a solid block of it", painted["other"] > 200)
+
+    # Turning the ink off must repaint in something else, or the canvas is
+    # showing a stale picture.
+    pg.uncheck('[data-k="inkEnabled"]')
+    pg.click("#preview")
+    pg.wait_for_timeout(2500)
+    after = pg.evaluate("""() => {
+        const c = document.getElementById('pv');
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        let ink = 0;
+        for (let i = 0; i < d.length; i += 4) {
+            if (d[i] === 122 && d[i+1] === 47 && d[i+2] === 138) ink++;
+        }
+        return ink;
+    }""")
+    check("turning the ink off repaints without it (%d px left)" % after, after < painted["ink"] / 4)
 
     # --- a lapsed membership mid-session -------------------------------
     pg.evaluate("() => { window.__licenceReply = { valid: false, reason: 'membership_inactive' }; }")

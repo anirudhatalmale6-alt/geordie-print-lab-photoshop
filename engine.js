@@ -454,6 +454,41 @@
 	}
 
 	/* ------------------------------------------------------------------ */
+	/* Ink colour                                                          */
+	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Flatten every surviving pixel to one ink.
+	 *
+	 * A screen prints one colour. Up to here the dots have kept whatever colour
+	 * the artwork happened to be, which is right for looking at and wrong for
+	 * printing: the separation is a stencil, and the ink that goes through it is
+	 * chosen at the press, not by the photograph.
+	 *
+	 * Alpha is left exactly as it is. The halftone decided which pixels are ink
+	 * and that decision is not revisited here - this only says what colour the
+	 * ink is, so turning it on can never change the shape of the print, only its
+	 * colour. That is worth keeping true: it means switching ink cannot silently
+	 * alter dot gain or coverage.
+	 */
+	function inkColour( data, rgb ) {
+		var r = clamp255( rgb[ 0 ] );
+		var g = clamp255( rgb[ 1 ] );
+		var b = clamp255( rgb[ 2 ] );
+		var i;
+
+		for ( i = 0; i < data.length; i += 4 ) {
+			if ( data[ i + 3 ] === 0 ) {
+				continue;
+			}
+
+			data[ i ] = r;
+			data[ i + 1 ] = g;
+			data[ i + 2 ] = b;
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
 	/* Underbase                                                           */
 	/* ------------------------------------------------------------------ */
 
@@ -563,6 +598,14 @@
 			if ( s.cleanupIntensity > 0 ) {
 				cleanupIntensity( data, w, h, s.cleanupIntensity );
 			}
+		}
+
+		// 6. Ink colour, last, because it is the last word on RGB.
+		//    Step 4 pushes every channel through a lookup table and steps 3 and
+		//    5 decide alpha; colouring before either would mean the ink that
+		//    came out was not the ink that was picked.
+		if ( s.inkEnabled ) {
+			inkColour( data, s.ink );
 		}
 
 		return data;

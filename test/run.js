@@ -422,6 +422,79 @@ run.push( ( async () => {
 	check( 'a mismatched engine fails loudly', /different versions/.test( msg ) );
 } )() );
 
+/* ------------------------------------------------------------------ */
+/* 4b. Preview                                                         */
+/* ------------------------------------------------------------------ */
+
+section( 'preview' );
+
+run.push( ( async () => {
+	const ps = fakePS();
+	const bridge = new Bridge( ps );
+	const S = Object.assign( studio.defaults(), {
+		halftone: true, lpi: 40, inkEnabled: true, ink: [ 200, 16, 46 ]
+	} );
+
+	ps.calls.length = 0;
+
+	const res = await studio.preview( { bridge, engine }, S, {} );
+
+	/* The whole reason preview is separate from apply. Looking at an ink
+	   colour must not put a step in anyone's history to undo. */
+	check( 'preview never writes to the document',
+		ps.calls.filter( ( c ) => c.putPixels ).length === 0 );
+	check( 'preview never touches history',
+		! ps.calls.some( ( c ) => c.suspend !== undefined || c.resume !== undefined ) );
+
+	check( 'preview returns pixels', !! res.data && res.data.length === res.width * res.height * 4 );
+
+	/* Read small on purpose - the engine runs on the main thread here. */
+	check( 'preview reads a proxy, not the full file',
+		Math.max( res.width, res.height ) <= studio.PREVIEW_MAX_SIDE );
+	check( 'and the full file is bigger than that', 1200 > studio.PREVIEW_MAX_SIDE );
+
+	/* A preview that showed something other than what Apply produces would be
+	   worse than no preview. Same input, same settings, same scale -> same
+	   bytes as the engine alone. */
+	const src = ( await bridge.read( studio.PREVIEW_MAX_SIDE ) );
+	const expected = new Uint8ClampedArray( src.data );
+	engine.run( expected, src.width, src.height,
+		studio.settingsForEngine( studio.clampSettings( S ) ), src.scale );
+	check( 'preview shows exactly what apply would produce',
+		Buffer.from( res.data.buffer ).equals( Buffer.from( expected.buffer ) ) );
+
+	/* And the ink actually landed, or the check above would pass on two
+	   equally wrong pictures. */
+	let inked = 0;
+	let offInk = 0;
+	for ( let i = 0; i < res.data.length; i += 4 ) {
+		if ( res.data[ i + 3 ] === 0 ) continue;
+		inked++;
+		if ( res.data[ i ] !== 200 || res.data[ i + 1 ] !== 16 || res.data[ i + 2 ] !== 46 ) offInk++;
+	}
+	check( 'the preview is in the chosen ink (' + inked + ' px, ' + offInk + ' wrong)',
+		inked > 100 && offInk === 0 );
+} )() );
+
+run.push( ( async () => {
+	const bridge = new Bridge( fakePS( { doc: { mode: 'CMYKColor' } } ) );
+	let msg = '';
+	try {
+		await studio.preview( { bridge, engine }, studio.defaults(), {} );
+	} catch ( e ) {
+		msg = e.message;
+	}
+	check( 'preview refuses a CMYK document too', /RGB/.test( msg ) );
+} )() );
+
+run.push( ( async () => {
+	const bridge = new Bridge( fakePS() );
+	const S = Object.assign( studio.defaults(), { underbase: true, choke: 2, halftone: true } );
+	const res = await studio.preview( { bridge, engine }, S, {} );
+	check( 'preview builds the underbase so it can be shown underneath',
+		res.underbase === true && !! res.underbaseData );
+} )() );
+
 section( 'settings are bounded' );
 
 const wild = studio.clampSettings( Object.assign( studio.defaults(), {
@@ -433,6 +506,12 @@ check( 'gamma can never be zero', wild.adjGamma > 0 && wild.inGamma > 0 );
 check( 'choke is capped', wild.choke <= 20 );
 check( 'a broken knockout falls back to black', Array.isArray( wild.knockout ) && wild.knockout.length === 3 );
 
+const inks = studio.clampSettings( Object.assign( studio.defaults(), { ink: 'not a colour' } ) );
+check( 'a broken ink falls back to black', JSON.stringify( inks.ink ) === '[0,0,0]' );
+
+const outOfRange = studio.clampSettings( Object.assign( studio.defaults(), { ink: [ 999, -40, 12.6 ] } ) );
+check( 'ink channels are brought into range', JSON.stringify( outOfRange.ink ) === '[255,0,13]' );
+
 /* ------------------------------------------------------------------ */
 
 Promise.all( run ).then( () => {
@@ -440,8 +519,8 @@ Promise.all( run ).then( () => {
 
 	/* A floor. A test file that stops running looks exactly like one that
 	   passes, and this one is full of async blocks that could silently vanish. */
-	if ( total < 57 ) {
-		fails.push( 'only ' + total + ' checks ran, expected at least 57' );
+	if ( total < 68 ) {
+		fails.push( 'only ' + total + ' checks ran, expected at least 68' );
 	}
 
 	console.log( '\n' + ( fails.length ? fails.length + ' FAILED of ' + total : 'ALL ' + ok + ' PASSED' ) );

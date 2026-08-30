@@ -21,8 +21,27 @@
 <!-- The tool. -->
 <div id="tool" class="screen hidden">
 
+	<!-- The mark stays on screen while the tool is in use. The unlock screen
+	     carries it too, but that screen is gone a second after it appears. -->
+	<div class="brand">
+		<img id="brand-logo" src="icons/logo.png" alt="">
+		<span class="brand__name">Geordie Print Lab</span>
+	</div>
+
 	<div class="bar">
 		<span id="doc" class="dim small">No document</span>
+	</div>
+
+	<div class="preview">
+		<canvas id="pv" width="260" height="180"></canvas>
+		<p id="pv-msg" class="msg small dim">Press Preview to see the result.</p>
+		<div class="actions">
+			<button id="preview">Preview</button>
+			<label class="row row--tight">Garment
+				<input type="checkbox" data-k="shirtPreview">
+				<input id="shirt-hex" type="text" class="hex" data-hex="shirt" spellcheck="false" maxlength="7">
+			</label>
+		</div>
 	</div>
 
 	<details open>
@@ -45,6 +64,14 @@
 				<option value="luma">Brightness</option>
 			</select>
 		</label>
+
+		<p class="cap">Ink colour</p>
+		<label class="row"><input type="checkbox" data-k="inkEnabled"> Print in one ink</label>
+		<label class="row">Ink
+			<input id="ink-hex" type="text" class="hex" data-hex="ink" spellcheck="false" maxlength="7">
+		</label>
+		<div id="swatches" class="swatches"></div>
+		<p class="dim small">A screen prints one colour. This only changes the colour of the dots, never where they fall.</p>
 	</details>
 
 	<details>

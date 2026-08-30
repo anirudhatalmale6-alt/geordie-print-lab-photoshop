@@ -94,6 +94,89 @@ h1 {
 	letter-spacing: 0.04em;
 }
 
+/* --- brand ------------------------------------------------------- */
+
+.brand {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding-bottom: 2px;
+}
+
+#brand-logo {
+	width: 26px;
+	height: 26px;
+	flex: none;
+}
+
+.brand__name {
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.01em;
+}
+
+/* --- preview ----------------------------------------------------- */
+
+.preview {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+
+#pv {
+	width: 100%;
+	height: auto;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	/* Owns its background so an unpainted canvas reads as empty rather than
+	   as a hole in the panel. */
+	background: var(--field);
+}
+
+.row--tight {
+	margin-left: auto;
+	gap: 5px;
+	padding: 0;
+}
+
+.hex {
+	width: 74px;
+	font-family: monospace;
+	text-align: center;
+}
+
+.cap {
+	margin: 7px 0 2px;
+	font-size: 10px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--dim);
+}
+
+.swatches {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 2px 0 4px;
+}
+
+.swatch {
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	cursor: pointer;
+}
+
+/* A 2px ring in the panel's ink, not a colour change - the button IS the
+   colour, so recolouring it to show selection would be a lie. */
+.swatch.is-on {
+	border-color: var(--ink);
+	box-shadow: 0 0 0 2px var(--brand);
+}
+
 /* --- controls ---------------------------------------------------- */
 
 details {

@@ -25,10 +25,12 @@ if ! head -c 400 "$DIR/engine.js.new" | grep -q 'Prepress engine'; then
 fi
 
 # A stale copy is still a valid engine file, so "is it the engine" cannot catch
-# it. This can: the plugin calls run() directly and needs the exported entry
-# points, which only the current file has.
-if ! grep -q 'ENGINE_API' "$DIR/engine.js.new"; then
-	echo "fetched an engine with no exported entry points - stale cache?" >&2
+# it - and neither can a fixed marker, because every older version carried the
+# same one. engine-ok.js checks the only thing that separates the current
+# engine from an older one: whether it understands every setting this plugin
+# sends. Run BEFORE installing, so a stale fetch never lands on disk.
+if ! node "$DIR/test/engine-ok.js" "$DIR/engine.js.new"; then
+	echo "refusing to install that engine" >&2
 	rm -f "$DIR/engine.js.new"
 	exit 1
 fi
