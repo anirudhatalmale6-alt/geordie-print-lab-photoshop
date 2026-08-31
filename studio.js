@@ -37,6 +37,15 @@ function defaults() {
 		lightBlue: 0,
 		lightMagenta: 0,
 
+		/* One colour taken out of the six families and given its own slider.
+		   The six sit 60 degrees apart, so a hue between two of them is shared
+		   between two sliders - which is right for orange and wrong for a lime
+		   green at hue 92, where the Yellows slider ends up with nearly half
+		   the say. -1 is "nothing picked" and the whole thing is inert. */
+		bandPick: -1,
+		bandPickWidth: 20,
+		lightPick: 0,
+
 		knockout: [ 0, 0, 0 ],
 
 		bgRemove: false,
@@ -80,6 +89,7 @@ var ENGINE_KEYS = [
 	'brightness', 'contrast',
 	'hue', 'saturation', 'vibrance', 'lightness',
 	'lightRed', 'lightYellow', 'lightGreen', 'lightCyan', 'lightBlue', 'lightMagenta',
+	'bandPick', 'bandPickWidth', 'lightPick',
 	'knockout',
 	'bgRemove', 'bgTolerance', 'bgSoftness',
 	'halftone', 'lpi', 'angle', 'shape', 'screenSource',
@@ -185,10 +195,20 @@ function clampSettings( S ) {
 	   sliders into a per-hue table. A NaN from a hand-edited preset would
 	   propagate through either one and come out as a black pixel rather than
 	   as an error, so they are numbers or they are zero. */
-	[ 'brightness', 'contrast', 'vibrance', 'lightRed', 'lightYellow', 'lightGreen',
+	[ 'brightness', 'contrast', 'vibrance', 'lightPick', 'lightRed', 'lightYellow', 'lightGreen',
 		'lightCyan', 'lightBlue', 'lightMagenta' ].forEach( function ( key ) {
 		out[ key ] = Math.min( 100, Math.max( -100, Number( out[ key ] ) || 0 ) );
 	} );
+
+	/* The picked hue indexes a 360-entry table. A NaN or an out-of-range number
+	   would read past the end of it, which in a typed array is `undefined` and
+	   turns the pixel black rather than throwing - so anything that is not a
+	   hue on the wheel becomes -1, which the engine reads as "nothing picked"
+	   and ignores entirely. Floored to match how the engine looks it up. */
+	out.bandPick = Number( out.bandPick );
+	out.bandPick = ( isFinite( out.bandPick ) && out.bandPick >= 0 && out.bandPick < 360 ) ?
+		Math.floor( out.bandPick ) : -1;
+	out.bandPickWidth = Math.min( 60, Math.max( 5, Number( out.bandPickWidth ) || 20 ) );
 
 	if ( ! Array.isArray( out.knockout ) || 3 !== out.knockout.length ) {
 		out.knockout = [ 0, 0, 0 ];

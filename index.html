@@ -147,6 +147,12 @@
 		<label class="row"><i class="chip" style="background:#0000ff"></i> Blues <input type="range" data-k="lightBlue" min="-100" max="100" step="1"><output data-o="lightBlue"></output></label>
 		<label class="row"><i class="chip" style="background:#ff00ff"></i> Magentas <input type="range" data-k="lightMagenta" min="-100" max="100" step="1"><output data-o="lightMagenta"></output></label>
 		<p class="dim small">The same six as Photoshop. Each one lightens or darkens just that family of colours and nothing else. Greys are left alone on purpose - a grey pixel has no colour to belong to.</p>
+
+		<p class="cap">One colour on its own</p>
+		<label class="row"><i class="chip" id="pick-chip"></i> Colour <input type="range" data-k="bandPick" min="-1" max="359" step="1"><output data-o="bandPick"></output></label>
+		<label class="row">Lighten or darken it <input type="range" data-k="lightPick" min="-100" max="100" step="1"><output data-o="lightPick"></output></label>
+		<label class="row">How close it has to be <input type="range" data-k="bandPickWidth" min="5" max="60" step="1"><output data-o="bandPickWidth"></output></label>
+		<p class="dim small">The six above sit 60 degrees apart, so a colour landing between two of them is shared between two sliders. That is right for orange and wrong for a lime green, which reads as roughly half green and half yellow and gets dragged about by the Yellows slider. Slide the top one to your colour and it comes out of the six entirely - one slider, one colour, and nothing else in the artwork moves. All the way left is off.</p>
 	</details>
 
 	<details>

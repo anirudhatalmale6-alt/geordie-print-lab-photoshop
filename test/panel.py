@@ -495,8 +495,54 @@ with sync_playwright() as p:
           all(pg.locator('[data-k="%s"]' % k).count() == 1 for k in
               ["brightness", "contrast", "lightRed", "lightYellow",
                "lightGreen", "lightCyan", "lightBlue", "lightMagenta"]))
-    check("each colour slider has its colour beside it",
-          pg.locator("#tool .chip").count() == 6)
+    # Asserted per slider rather than as a count of chips on the panel. A count
+    # says nothing about WHICH slider is missing one, and it breaks the moment
+    # any other row gains a chip - which is exactly what happened when the
+    # picked-colour row was added, and the count went red over a row that was
+    # perfectly correct.
+    missing = [k for k in ["lightRed", "lightYellow", "lightGreen",
+                           "lightCyan", "lightBlue", "lightMagenta"]
+               if pg.locator('label:has([data-k="%s"]) .chip' % k).count() != 1]
+    check("each colour slider has its colour beside it"
+          + (" (missing on %s)" % ", ".join(missing) if missing else ""), not missing)
+
+    for key in ["bandPick", "bandPickWidth", "lightPick"]:
+        assert key in defaults, key
+    check("the picked-colour controls are on the panel",
+          all(pg.locator('[data-k="%s"]' % k).count() == 1
+              for k in ["bandPick", "bandPickWidth", "lightPick"]))
+    check("the picked colour has a chip of its own",
+          pg.locator("#pick-chip").count() == 1)
+
+    # -1 is "nothing picked". Printed raw it reads as a setting of minus one
+    # degree, which is a colour, and the two sliders under it then look broken
+    # rather than switched off.
+    check("with nothing picked it says so rather than showing minus one",
+          pg.inner_text('[data-o="bandPick"]').strip() == "off")
+    check("and the two sliders under it are switched off",
+          pg.locator('[data-k="lightPick"]').is_disabled()
+          and pg.locator('[data-k="bandPickWidth"]').is_disabled())
+
+    pg.fill('[data-k="bandPick"]', "92")
+    pg.dispatch_event('[data-k="bandPick"]', "input")
+    pg.wait_for_timeout(250)
+    check("picking a hue reports it in degrees",
+          pg.inner_text('[data-o="bandPick"]').strip() == "92°")
+    check("and brings the two sliders alive",
+          not pg.locator('[data-k="lightPick"]').is_disabled())
+    # The pure hue at full strength, not the pixel the hue came from. His lime
+    # is 117,255,0 and hue 92 at full strength is 119,255,0 - the chip is
+    # answering "which family are we on" the same way the six above it do, and
+    # a softened or literal swatch answers a different question.
+    check("and paints the chip the hue that was picked",
+          pg.evaluate("() => getComputedStyle(document.getElementById('pick-chip')).backgroundColor")
+          == "rgb(119, 255, 0)")
+
+    pg.fill('[data-k="bandPick"]', "-1")
+    pg.dispatch_event('[data-k="bandPick"]', "input")
+    pg.wait_for_timeout(250)
+    check("sliding it back off switches the two sliders off again",
+          pg.locator('[data-k="lightPick"]').is_disabled())
 
     # Sign back in - the sign-out at the end of the previous block has not
     # happened yet, so the tool is still open.

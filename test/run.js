@@ -738,13 +738,83 @@ check( 'none of it runs with adjustments disabled',
 
 /* ------------------------------------------------------------------ */
 
+section( 'one colour taken out of the six families' );
+
+/*
+ * The reported fault: "green is picking it up as yellow". His Lime Green is
+ * C54 M0 Y100 K0, which lands at hue 92 - closer to the green centre at 120
+ * than to the yellow one at 60, but only just, so the Yellows slider ends up
+ * with 46 per cent of the say over it.
+ *
+ * The three checks that matter are the fault reproducing, the fix being EXACT
+ * rather than nearly, and a colour 22 degrees away staying put. Exactness is
+ * not fussiness here: the engine indexes its table at a whole degree, so a
+ * pick that rounded differently would leave a sliver of the six families still
+ * reaching the very colour that was picked to escape them.
+ */
+const LIME = [ 117, 255, 0 ];    // JC001 Lime Green, hue 92
+const KELLY = [ 23, 255, 0 ];    // JC001 Kelly Green, hue 114
+const SUN = [ 255, 232, 0 ];     // JC001 Sun Yellow, hue 54
+
+const limeBug = tone( LIME, { lightYellow: 60 } );
+check( 'the Yellows slider moves his lime green while nothing is picked',
+	JSON.stringify( limeBug ) !== JSON.stringify( LIME ) );
+
+const limeFixed = tone( LIME, { lightYellow: 60, bandPick: 92 } );
+check( 'and leaves it exactly alone once it is picked',
+	JSON.stringify( limeFixed ) === JSON.stringify( LIME ), JSON.stringify( limeFixed ) );
+
+check( 'pure yellow still moves by exactly as much as it did',
+	JSON.stringify( tone( SUN, { lightYellow: 60, bandPick: 92 } ) )
+		=== JSON.stringify( tone( SUN, { lightYellow: 60 } ) ) );
+
+check( 'the picked slider lightens the picked colour',
+	tone( LIME, { bandPick: 92, lightPick: 60 } )[ 0 ] > LIME[ 0 ] + 20 );
+
+check( 'and darkens it going the other way',
+	tone( LIME, { bandPick: 92, lightPick: -60 } )[ 1 ] < LIME[ 1 ] - 20 );
+
+check( 'kelly green, 22 degrees off, is outside the default window',
+	JSON.stringify( tone( KELLY, { bandPick: 92, lightPick: 60 } ) ) === JSON.stringify( KELLY ) );
+
+check( 'and inside it once the window is widened',
+	JSON.stringify( tone( KELLY, { bandPick: 92, lightPick: 60, bandPickWidth: 40 } ) )
+		!== JSON.stringify( KELLY ) );
+
+check( 'a grey cannot be moved by it, having no hue to belong to',
+	JSON.stringify( tone( GREY, { bandPick: 92, lightPick: 100 } ) ) === JSON.stringify( GREY ) );
+
+[ -100, -40, 40, 100 ].forEach( ( a ) => {
+	check( 'the picked slider is inert with nothing picked, at ' + a,
+		JSON.stringify( tone( LIME, { lightPick: a } ) ) === JSON.stringify( LIME ) );
+} );
+
+/* A hand-edited preset, or a future bug upstream, must not be able to index
+   past the end of a 360 entry table - which in a typed array reads undefined
+   and paints the pixel black rather than throwing. */
+[ 360, 400, -5, 'green', null, undefined, NaN ].forEach( ( bad ) => {
+	check( 'a bandPick of ' + String( bad ) + ' is refused rather than wrapped',
+		JSON.stringify( tone( LIME, { bandPick: bad, lightPick: 100 } ) ) === JSON.stringify( LIME ) );
+} );
+
+check( 'the window cannot be clamped to nothing',
+	studio.clampSettings( Object.assign( studio.defaults(), { bandPickWidth: 0 } ) ).bandPickWidth >= 5 );
+
+check( 'nor opened wider than the panel allows',
+	studio.clampSettings( Object.assign( studio.defaults(), { bandPickWidth: 999 } ) ).bandPickWidth <= 60 );
+
+check( 'a fractional pick is floored, the way the engine looks it up',
+	studio.clampSettings( Object.assign( studio.defaults(), { bandPick: 92.9 } ) ).bandPick === 92 );
+
+/* ------------------------------------------------------------------ */
+
 Promise.all( run ).then( () => {
 	const total = ok + fails.length;
 
 	/* A floor. A test file that stops running looks exactly like one that
 	   passes, and this one is full of async blocks that could silently vanish. */
-	if ( total < 138 ) {
-		fails.push( 'only ' + total + ' checks ran, expected at least 138' );
+	if ( total < 160 ) {
+		fails.push( 'only ' + total + ' checks ran, expected at least 160' );
 	}
 
 	console.log( '\n' + ( fails.length ? fails.length + ' FAILED of ' + total : 'ALL ' + ok + ' PASSED' ) );

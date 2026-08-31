@@ -354,23 +354,66 @@
 	 * six distances and a wrap for every pixel of a 1500px proxy is millions of
 	 * operations for 360 distinct answers.
 	 */
-	function bandTable( amounts ) {
+	/**
+	 * Circular distance between two hue angles, 0 to 180.
+	 */
+	function hueGap( a, b ) {
+		var d = Math.abs( a - b ) % 360;
+
+		return d > 180 ? 360 - d : d;
+	}
+
+	/**
+	 * One colour of the customer's own choosing, taken out of the six families.
+	 *
+	 * The six are 60 apart, so a hue landing between two centres is genuinely
+	 * shared between them - which is right for orange and wrong for a garment
+	 * colour somebody actually sells. A lime green at hue 92 is 54 percent green
+	 * and 46 percent yellow, so the Greens slider only has half the say over it
+	 * and the Yellows slider drags it about; that is the "green is picking up as
+	 * yellow" fault, and it is arithmetic, not a bug in the bands.
+	 *
+	 * The fix is NOT to move a band centre. Moving Greens from 120 down to 92
+	 * would fix the lime and hand pure green over to the Cyans slider, trading
+	 * one surprise for another. Instead this window REPLACES the six families
+	 * inside itself: at the picked hue the six contribute nothing and the one
+	 * slider owns it outright, fading back to normal at the edge of the window.
+	 * Nothing outside the window changes at all.
+	 *
+	 * @param {number} deg   Hue being asked about.
+	 * @param {number} pick  Picked hue, or -1 for none.
+	 * @param {number} width Half-width of the window in degrees.
+	 * @return {number} 0 to 1: how much of this hue the picked colour owns.
+	 */
+	function pickWeight( deg, pick, width ) {
+		if ( pick < 0 || width <= 0 ) {
+			return 0;
+		}
+
+		var d = hueGap( deg, pick );
+
+		return d >= width ? 0 : 1 - d / width;
+	}
+
+	function bandTable( amounts, pick, pickWidth, pickAmount ) {
 		var table = new Float32Array( 360 );
-		var deg, k, d, total;
+		var deg, k, d, total, w;
 
 		for ( deg = 0; deg < 360; deg++ ) {
 			total = 0;
 
 			for ( k = 0; k < 6; k++ ) {
-				d = Math.abs( deg - BANDS[ k ] );
-
-				if ( d > 180 ) {
-					d = 360 - d;
-				}
+				d = hueGap( deg, BANDS[ k ] );
 
 				if ( d < 60 ) {
 					total += ( 1 - d / 60 ) * ( amounts[ k ] || 0 ) / 100;
 				}
+			}
+
+			w = pickWeight( deg, pick, pickWidth );
+
+			if ( w > 0 ) {
+				total = total * ( 1 - w ) + ( pickAmount / 100 ) * w;
 			}
 
 			table[ deg ] = total;
@@ -388,7 +431,7 @@
 	 * would move them by whichever way the rounding fell. Weighting by
 	 * saturation makes the effect fade out exactly as the colour does.
 	 */
-	function applyBandLight( data, amounts ) {
+	function applyBandLight( data, amounts, pick, pickWidth, pickAmount ) {
 		var k, any = false;
 
 		for ( k = 0; k < 6; k++ ) {
@@ -397,11 +440,17 @@
 			}
 		}
 
+		/* The picked window is worth a pass on its own even with every family
+		   at zero, because inside the window it is the only thing speaking. */
+		if ( pick >= 0 && pickWidth > 0 && pickAmount ) {
+			any = true;
+		}
+
 		if ( ! any ) {
 			return;
 		}
 
-		var table = bandTable( amounts );
+		var table = bandTable( amounts, pick, pickWidth, pickAmount );
 		var hsl = [ 0, 0, 0 ];
 		var rgb = [ 0, 0, 0 ];
 		var i, deg, shift, l;
@@ -913,6 +962,19 @@
 			   about the image as it now is rather than as it arrived. */
 			applyVibrance( data, s.vibrance || 0 );
 
+			/* A pick of -1 means none. Anything outside 0..359 is treated as
+			   none rather than wrapped: a hue that arrived out of range is a
+			   sign something upstream is wrong, and silently wrapping it would
+			   apply the slider to whatever colour the wrap happened to land on. */
+			/* Floored, not rounded, because the table is looked up at
+			   `( hue * 360 ) | 0` and the two have to agree. Rounding a pick of
+			   92.5 up to 93 while the pixel it was taken from reads as 92 would
+			   leave the picked colour one degree outside its own window - a
+			   small residue of the six families would still reach it, which is
+			   exactly the thing this is here to stop. */
+			var pick = typeof s.bandPick === 'number' && s.bandPick >= 0 && s.bandPick < 360 ?
+				Math.floor( s.bandPick ) : -1;
+
 			applyBandLight( data, [
 				s.lightRed || 0,
 				s.lightYellow || 0,
@@ -920,7 +982,7 @@
 				s.lightCyan || 0,
 				s.lightBlue || 0,
 				s.lightMagenta || 0
-			] );
+			], pick, Math.max( 5, Math.min( 180, s.bandPickWidth || 20 ) ), s.lightPick || 0 );
 		}
 
 		// 2. Background removal, using the knockout colour from Shirt Color.

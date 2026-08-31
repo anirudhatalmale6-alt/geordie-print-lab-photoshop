@@ -93,13 +93,15 @@ function toScreen() {
 		const out = document.querySelector( '[data-o="' + k + '"]' );
 
 		if ( out ) {
-			out.textContent = S[ k ];
+			out.textContent = readout( k, S[ k ] );
 		}
 	} );
 
 	hexFields().forEach( ( el ) => {
 		el.value = toHex( S[ el.getAttribute( 'data-hex' ) ] );
 	} );
+
+	paintPickChip();
 }
 
 function fromScreen( el ) {
@@ -116,8 +118,69 @@ function fromScreen( el ) {
 	const out = document.querySelector( '[data-o="' + k + '"]' );
 
 	if ( out ) {
-		out.textContent = S[ k ];
+		out.textContent = readout( k, S[ k ] );
 	}
+
+	paintPickChip();
+}
+
+/**
+ * What a slider's number should say when the number on its own is not the
+ * answer.
+ *
+ * The picked hue runs from -1 to 359 and -1 means "nothing picked". Printed
+ * raw that reads as a setting of minus one degree, which is a colour, and the
+ * two sliders under it would then look broken rather than switched off.
+ */
+function readout( k, v ) {
+	if ( 'bandPick' === k ) {
+		return v < 0 ? 'off' : v + '°';
+	}
+
+	if ( 'bandPickWidth' === k ) {
+		return '±' + v + '°';
+	}
+
+	return String( v );
+}
+
+/**
+ * Show the picked hue as the colour it is, and grey out the two sliders that
+ * have nothing to act on while it is off.
+ */
+function paintPickChip() {
+	const chip = document.getElementById( 'pick-chip' );
+
+	if ( ! chip ) {
+		return;
+	}
+
+	const on = S.bandPick >= 0;
+
+	chip.style.background = on ? hueHex( S.bandPick ) : 'transparent';
+	chip.style.borderStyle = on ? 'solid' : 'dashed';
+
+	[ 'lightPick', 'bandPickWidth' ].forEach( ( k ) => {
+		const el = document.querySelector( '[data-k="' + k + '"]' );
+
+		if ( el ) {
+			el.disabled = ! on;
+		}
+	} );
+}
+
+/**
+ * A hue angle as a full-strength colour, for the chip beside the slider.
+ */
+function hueHex( deg ) {
+	const x = Math.round( ( 1 - Math.abs( ( ( deg / 60 ) % 2 ) - 1 ) ) * 255 );
+	const c = deg < 60 ? [ 255, x, 0 ] :
+		deg < 120 ? [ x, 255, 0 ] :
+		deg < 180 ? [ 0, 255, x ] :
+		deg < 240 ? [ 0, x, 255 ] :
+		deg < 300 ? [ x, 0, 255 ] : [ 255, 0, x ];
+
+	return toHex( c );
 }
 
 /* ------------------------------------------------------------------ */
