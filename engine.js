@@ -62,37 +62,76 @@
 	}
 
 	/**
+	 * The smooth S between 0 and 1, and its exact inverse.
+	 *
+	 * Both are pinned: 0 maps to 0 and 1 maps to 1, whatever happens between.
+	 * That pinning is the whole point of using them for contrast, and the
+	 * inverse is a closed form rather than a table so the two directions of the
+	 * slider are exactly each other's undo.
+	 */
+	function smoothStep( x ) {
+		return x * x * ( 3 - 2 * x );
+	}
+
+	function unSmoothStep( x ) {
+		return 0.5 - Math.sin( Math.asin( 1 - 2 * x ) / 3 );
+	}
+
+	/**
 	 * Brightness and contrast, folded into a lookup that already exists.
 	 *
-	 * Both of these are per-channel functions of one input value, exactly like
-	 * levels, so pushing the levels table through them costs 256 operations and
-	 * leaves Image Adjustments as a single pass over the pixels. Doing it as its
-	 * own pass would be a second walk of the whole image for no benefit.
+	 * Both are per-channel functions of one input value, exactly like levels, so
+	 * pushing the levels table through them costs 256 operations and leaves
+	 * Image Adjustments as a single pass over the pixels.
 	 *
-	 * Brightness is a straight offset in levels: +30 means thirty levels out of
-	 * 255, which is a number you can predict rather than a curve you have to
-	 * feel your way around. Contrast pivots on mid grey, so it opens the ends
-	 * out without moving the middle - the same behaviour Photoshop's has.
+	 * Both are CURVES, not offsets, and that is the whole difference between
+	 * this and what was here before.
+	 *
+	 * Brightness used to add a flat number to every channel. That is what
+	 * Photoshop did until 2007 and what it stopped doing, because it wrecks
+	 * saturated colour: adding 40 to a pure green takes 0,255,0 to 40,255,40,
+	 * and the green channel was already at the top so the only thing that
+	 * actually changed was that red and blue came up. The colour did not get
+	 * brighter, it got paler. A gamma-shaped lift instead leaves both ends where
+	 * they are and moves the middle, so a pure green brightens as a green and a
+	 * channel already at 255 is not asked to go further. Base 3 puts the full
+	 * slider at a gamma of 1/3 up and 3 down, which is a real adjustment without
+	 * being a destructive one.
+	 *
+	 * Contrast used to be the standard pivot-on-mid-grey multiply, which clips:
+	 * at the top of the slider everything but the midtones is crushed to black
+	 * or blown to white, and clipped detail is gone for good. Blending towards
+	 * the smooth S curve instead steepens the middle while still passing through
+	 * 0 and 255, so it can be wound all the way up and wound back down again
+	 * with the shadows and highlights still there.
 	 *
 	 * Brightness is applied first, which is the order Photoshop uses, and it
-	 * matters: contrast afterwards amplifies the offset rather than ignoring it.
+	 * matters: contrast afterwards works on the lifted image rather than the
+	 * original.
 	 */
 	function brightContrast( lut, brightness, contrast ) {
 		if ( ! brightness && ! contrast ) {
 			return lut;
 		}
 
-		/* -100..100 mapped onto -128..128 before the standard contrast factor,
-		   which gives a useful range - about a third at the bottom end and about
-		   three times at the top. The full -255..255 mapping is unusable: the top
-		   of the slider would be a factor of 130 and everything but mid grey
-		   would clip. */
-		var cc = contrast * 1.28;
-		var f = ( 259 * ( cc + 255 ) ) / ( 255 * ( 259 - cc ) );
-		var i;
+		var gamma = Math.pow( 3, -brightness / 100 );
+		var k = Math.abs( contrast ) / 100;
+		var i, x;
 
 		for ( i = 0; i < 256; i++ ) {
-			lut[ i ] = clamp255( Math.round( f * ( lut[ i ] + brightness - 128 ) + 128 ) );
+			x = lut[ i ] / 255;
+
+			if ( brightness ) {
+				x = Math.pow( x, gamma );
+			}
+
+			if ( contrast > 0 ) {
+				x = x * ( 1 - k ) + smoothStep( x ) * k;
+			} else if ( contrast < 0 ) {
+				x = x * ( 1 - k ) + unSmoothStep( x ) * k;
+			}
+
+			lut[ i ] = clamp255( Math.round( x * 255 ) );
 		}
 
 		return lut;
@@ -182,6 +221,109 @@
 
 			hslToRgb( h, s, l, rgb );
 
+			data[ i ] = rgb[ 0 ];
+			data[ i + 1 ] = rgb[ 1 ];
+			data[ i + 2 ] = rgb[ 2 ];
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* Vibrance                                                            */
+	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Saturation that knows when to stop.
+	 *
+	 * The plain saturation slider multiplies every pixel by the same number,
+	 * which means the colours that were already strong are the first to clip.
+	 * On a design that is mostly one flat brand colour that is the only thing
+	 * it does: the flat colour goes to the edge of the gamut and stops, and
+	 * everything muted around it has barely moved.
+	 *
+	 * Vibrance weights the lift by two things multiplied together:
+	 *
+	 *   s / (s + 0.15)   opens up as there starts to be a colour at all, so a
+	 *                    pixel that is very nearly grey is barely touched.
+	 *   (1 - s)squared   closes down as the colour approaches full strength.
+	 *
+	 * The falloff has to be the steep one. The obvious weight - 4s(1-s), a
+	 * hump with its peak at half saturation - was measured and is far too flat
+	 * to be worth having: it sits above 0.9 for everything between a quarter
+	 * and three quarters saturated, so on the full slider a muted colour gained
+	 * 0.48 and an already-vivid one at the same hue gained 0.35. That is a
+	 * saturation slider with extra steps. The pair above gives the muted colour
+	 * roughly seven times the lift, which is the whole point.
+	 *
+	 * The result is monotonic in saturation across all 256 input levels, in
+	 * both directions of the slider - checked, not assumed. If it were not,
+	 * two colours could swap places and a gradient would band.
+	 *
+	 * Greys are skipped outright rather than merely weighted to zero. A grey
+	 * pixel has no hue - `rgbToHsl` returns whichever channel happened to be
+	 * largest - so saturating one would invent a colour out of rounding.
+	 *
+	 * Skin is held back near hue 25, up to about two thirds, for the same reason
+	 * Photoshop does it: a face is the one thing in a photograph that everybody
+	 * can tell is wrong, and saturating it is what makes it look sunburnt.
+	 */
+	function applyVibrance( data, amount ) {
+		if ( ! amount ) {
+			return;
+		}
+
+		var k = amount / 100;
+		var hsl = [ 0, 0, 0 ];
+		var rgb = [ 0, 0, 0 ];
+		var i, s, w, deg, d, ns;
+
+		for ( i = 0; i < data.length; i += 4 ) {
+			if ( data[ i + 3 ] === 0 ) {
+				continue;
+			}
+
+			rgbToHsl( data[ i ], data[ i + 1 ], data[ i + 2 ], hsl );
+			s = hsl[ 1 ];
+
+			if ( s === 0 ) {
+				continue;
+			}
+
+			/* The (1-s)squared falloff is what makes this vibrance rather than
+			   saturation, and it applies in both directions. The s/(s+0.15)
+			   gate only applies going UP: it is there to stop a colour being
+			   manufactured in a pixel that had almost none, and there is no
+			   such risk on the way down - taking the last of the colour out of
+			   a nearly-grey pixel is precisely what the slider was asked to
+			   do. Keeping the gate on the way down was measured and made the
+			   negative end useless: a muted blue only lost a third of its
+			   saturation at the very bottom of the slider. */
+			w = ( 1 - s ) * ( 1 - s );
+
+			if ( k >= 0 ) {
+				w *= s / ( s + 0.15 );
+			}
+
+			deg = hsl[ 0 ] * 360;
+			d = Math.abs( deg - 25 );
+
+			if ( d > 180 ) {
+				d = 360 - d;
+			}
+
+			if ( d < 30 ) {
+				w *= 1 - 0.65 * ( 1 - d / 30 );
+			}
+
+			/* Bounded by whichever end it is heading for, so the full slider
+			   lands exactly on grey or exactly on the edge of the gamut and
+			   never has to be clipped back from beyond it. */
+			ns = clamp01( s + k * w * ( k >= 0 ? 1 - s : s ) );
+
+			if ( ns === s ) {
+				continue;
+			}
+
+			hslToRgb( hsl[ 0 ], ns, hsl[ 2 ], rgb );
 			data[ i ] = rgb[ 0 ];
 			data[ i + 1 ] = rgb[ 1 ];
 			data[ i + 2 ] = rgb[ 2 ];
@@ -765,6 +907,12 @@
 			);
 			applyLut( data, lut );
 			applyHsl( data, s.hue, s.saturation, s.lightness );
+
+			/* After the plain saturation, not before. Vibrance's whole job is
+			   to lift what is still muted, so it has to be asked that question
+			   about the image as it now is rather than as it arrived. */
+			applyVibrance( data, s.vibrance || 0 );
+
 			applyBandLight( data, [
 				s.lightRed || 0,
 				s.lightYellow || 0,

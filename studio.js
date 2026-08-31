@@ -25,6 +25,7 @@ function defaults() {
 		contrast: 0,
 		hue: 0,
 		saturation: 0,
+		vibrance: 0,
 		lightness: 0,
 
 		/* Photoshop's six colour families. Lightness only - nothing in here
@@ -77,7 +78,7 @@ var ENGINE_KEYS = [
 	'dpi',
 	'adjEnabled', 'adjBlack', 'adjGamma', 'adjWhite',
 	'brightness', 'contrast',
-	'hue', 'saturation', 'lightness',
+	'hue', 'saturation', 'vibrance', 'lightness',
 	'lightRed', 'lightYellow', 'lightGreen', 'lightCyan', 'lightBlue', 'lightMagenta',
 	'knockout',
 	'bgRemove', 'bgTolerance', 'bgSoftness',
@@ -184,7 +185,7 @@ function clampSettings( S ) {
 	   sliders into a per-hue table. A NaN from a hand-edited preset would
 	   propagate through either one and come out as a black pixel rather than
 	   as an error, so they are numbers or they are zero. */
-	[ 'brightness', 'contrast', 'lightRed', 'lightYellow', 'lightGreen',
+	[ 'brightness', 'contrast', 'vibrance', 'lightRed', 'lightYellow', 'lightGreen',
 		'lightCyan', 'lightBlue', 'lightMagenta' ].forEach( function ( key ) {
 		out[ key ] = Math.min( 100, Math.max( -100, Number( out[ key ] ) || 0 ) );
 	} );

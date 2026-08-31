@@ -130,12 +130,14 @@
 		<p class="cap">Brightness / contrast</p>
 		<label class="row">Brightness <input type="range" data-k="brightness" min="-100" max="100" step="1"><output data-o="brightness"></output></label>
 		<label class="row">Contrast <input type="range" data-k="contrast" min="-100" max="100" step="1"><output data-o="contrast"></output></label>
-		<p class="dim small">Brightness moves everything by that many levels out of 255. Contrast pushes the light and dark apart around mid grey, so the middle stays put.</p>
+		<p class="dim small">Both of these are curves, not flat shifts. Brightness lifts the middle and leaves pure black and pure white where they are, so a strong colour gets brighter instead of going pale. Contrast steepens the middle the same way and never clips the ends.</p>
 
 		<p class="cap">Hue / saturation</p>
 		<label class="row">Hue <input type="range" data-k="hue" min="-180" max="180" step="1"><output data-o="hue"></output></label>
 		<label class="row">Saturation <input type="range" data-k="saturation" min="-100" max="100" step="1"><output data-o="saturation"></output></label>
+		<label class="row">Vibrance <input type="range" data-k="vibrance" min="-100" max="100" step="1"><output data-o="vibrance"></output></label>
 		<label class="row">Lightness <input type="range" data-k="lightness" min="-100" max="100" step="1"><output data-o="lightness"></output></label>
+		<p class="dim small">Vibrance puts the lift where there is room for it - most into the muted colours, none into one that is already at full strength, none at all into grey, and it holds skin back so faces do not go orange. Reach for this one when a design looks flat.</p>
 
 		<p class="cap">Brightness by colour</p>
 		<label class="row"><i class="chip" style="background:#ff0000"></i> Reds <input type="range" data-k="lightRed" min="-100" max="100" step="1"><output data-o="lightRed"></output></label>

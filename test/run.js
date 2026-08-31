@@ -654,6 +654,88 @@ check( 'an empty box says nothing rather than complaining',
 check( 'a book row with no usable colour is skipped',
 	! studio.parseColour( 'Broken', [ { name: 'Broken', code: '', hex: 'not a colour' } ] ).rgb );
 
+section( 'brightness, contrast and vibrance are curves' );
+
+/*
+ * Straight at the engine, one flat swatch at a time. These are the checks the
+ * browser test on the website makes, repeated here because the plugin ships
+ * its own copy of the engine file and "the site is fine" is not the same
+ * claim as "the plugin is fine".
+ *
+ * Every one of them is about an END of the range. The bug being fixed was a
+ * brightness that added a flat number to every channel, and a flat number is
+ * indistinguishable from a curve in the middle of the range - it only shows
+ * itself at black, at white, and on a colour that is already at full strength.
+ */
+function tone( rgb, over ) {
+	const px = new Uint8ClampedArray( [ rgb[ 0 ], rgb[ 1 ], rgb[ 2 ], 255 ] );
+	const s = studio.settingsForEngine( studio.clampSettings( Object.assign(
+		studio.defaults(), { adjEnabled: true }, over
+	) ) );
+	engine.run( px, 1, 1, s, 1 );
+	return [ px[ 0 ], px[ 1 ], px[ 2 ] ];
+}
+
+function hslSat( rgb ) {
+	const mx = Math.max.apply( null, rgb ) / 255;
+	const mn = Math.min.apply( null, rgb ) / 255;
+	if ( mx === mn ) { return 0; }
+	const l = ( mx + mn ) / 2;
+	return l > 0.5 ? ( mx - mn ) / ( 2 - mx - mn ) : ( mx - mn ) / ( mx + mn );
+}
+
+const BLACK = [ 0, 0, 0 ];
+const WHITE = [ 255, 255, 255 ];
+const GREEN = [ 0, 255, 0 ];
+const GREY = [ 128, 128, 128 ];
+
+[ -100, -40, 40, 100 ].forEach( ( b ) => {
+	check( 'brightness ' + b + ' leaves black at black',
+		Math.max.apply( null, tone( BLACK, { brightness: b } ) ) === 0 );
+	check( 'brightness ' + b + ' leaves white at white',
+		Math.min.apply( null, tone( WHITE, { brightness: b } ) ) === 255 );
+} );
+
+const litGreen = tone( GREEN, { brightness: 40 } );
+check( 'a pure green brightens as a green rather than towards white',
+	litGreen[ 0 ] === 0 && litGreen[ 2 ] === 0 && litGreen[ 1 ] === 255 );
+check( 'brightness still actually does something to a midtone',
+	tone( GREY, { brightness: 40 } )[ 0 ] > 150 );
+check( 'and in the other direction',
+	tone( GREY, { brightness: -40 } )[ 0 ] < 105 );
+
+[ -100, 100 ].forEach( ( c ) => {
+	check( 'contrast ' + c + ' does not clip black',
+		Math.max.apply( null, tone( BLACK, { contrast: c } ) ) === 0 );
+	check( 'contrast ' + c + ' does not clip white',
+		Math.min.apply( null, tone( WHITE, { contrast: c } ) ) === 255 );
+} );
+check( 'contrast pivots on mid grey',
+	Math.abs( tone( GREY, { contrast: 100 } )[ 0 ] - 128 ) <= 1 );
+
+const muted = [ 105, 120, 150 ];
+const vivid = [ 60, 105, 210 ];
+const gainMuted = hslSat( tone( muted, { vibrance: 100 } ) ) - hslSat( muted );
+const gainVivid = hslSat( tone( vivid, { vibrance: 100 } ) ) - hslSat( vivid );
+
+check( 'vibrance lifts a muted colour', gainMuted > 0.15 );
+check( 'and lifts an already-vivid one at the same hue far less',
+	gainVivid * 4 < gainMuted );
+check( 'vibrance leaves grey exactly alone',
+	JSON.stringify( tone( GREY, { vibrance: 100 } ) ) === JSON.stringify( GREY ) );
+check( 'vibrance cannot push a full-strength colour past full',
+	JSON.stringify( tone( GREEN, { vibrance: 100 } ) ) === JSON.stringify( GREEN ) );
+check( 'negative vibrance drains the muted colour',
+	hslSat( tone( muted, { vibrance: -100 } ) ) < hslSat( muted ) / 2 );
+check( 'negative vibrance still leaves grey alone',
+	JSON.stringify( tone( GREY, { vibrance: -100 } ) ) === JSON.stringify( GREY ) );
+
+/* Nothing in the adjustments panel may run while the panel is switched off.
+   It is one checkbox away from every setting above and worth one check. */
+check( 'none of it runs with adjustments disabled',
+	JSON.stringify( tone( muted, { adjEnabled: false, brightness: 100, contrast: 100, vibrance: 100 } ) )
+		=== JSON.stringify( muted ) );
+
 /* ------------------------------------------------------------------ */
 
 Promise.all( run ).then( () => {
@@ -661,8 +743,8 @@ Promise.all( run ).then( () => {
 
 	/* A floor. A test file that stops running looks exactly like one that
 	   passes, and this one is full of async blocks that could silently vanish. */
-	if ( total < 115 ) {
-		fails.push( 'only ' + total + ' checks ran, expected at least 115' );
+	if ( total < 138 ) {
+		fails.push( 'only ' + total + ' checks ran, expected at least 138' );
 	}
 
 	console.log( '\n' + ( fails.length ? fails.length + ' FAILED of ' + total : 'ALL ' + ok + ' PASSED' ) );
