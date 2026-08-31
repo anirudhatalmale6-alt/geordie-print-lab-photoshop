@@ -92,9 +92,18 @@ check( 'the web engine key list was found (' + wk.length + ' keys)', wk.length >
    has no upscaler - but a shared key that DISAGREES is a
    customer getting two different results from the same numbers. */
 const shared = studio.ENGINE_KEYS.filter( ( k ) => k in wd );
+
+/* Two of the engine keys are worked out from other settings every time rather
+   than stored, so neither side has a default for them and neither should. They
+   still have to be SENT by both, which the key-list check above covers. */
+const stored = studio.ENGINE_KEYS.filter(
+	( k ) => studio.DERIVED_KEYS.indexOf( k ) === -1 );
+
 check( 'the plugin sends the same keys the website does', studio.ENGINE_KEYS.length === wk.length &&
 	studio.ENGINE_KEYS.every( ( k ) => wk.indexOf( k ) !== -1 ) );
-check( 'every engine key has a web default', shared.length === studio.ENGINE_KEYS.length );
+check( 'every stored engine key has a web default', shared.length === stored.length );
+check( 'and the derived ones are stored by neither side',
+	studio.DERIVED_KEYS.every( ( k ) => ! ( k in wd ) && ! ( k in pd ) ) );
 
 const disagree = shared.filter( ( k ) => JSON.stringify( wd[ k ] ) !== JSON.stringify( pd[ k ] ) );
 check( 'no shared default disagrees' + ( disagree.length ? ' (' + disagree.join( ', ' ) + ')' : '' ),
@@ -549,6 +558,102 @@ const noShirt = studio.settingsForEngine( studio.clampSettings( studio.defaults(
 check( 'so the engine is handed the same job with a garment set or not',
 	JSON.stringify( withShirt ) === JSON.stringify( noShirt ) );
 
+/* The check above passes on the DEFAULT screening mode, which is the mode
+   where the claim is easy. Every other mode has to be walked too, or a
+   regression that leaked the garment into, say, the opacity screen would sit
+   there green. */
+[ 'dark', 'white', 'opacity' ].forEach( ( mode ) => {
+	const a = studio.settingsForEngine( studio.clampSettings( Object.assign(
+		studio.defaults(), { halftone: true, screenSource: mode, shirt: [ 27, 42, 68 ] }
+	) ) );
+	const b = studio.settingsForEngine( studio.clampSettings( Object.assign(
+		studio.defaults(), { halftone: true, screenSource: mode, shirt: [ 240, 12, 3 ] }
+	) ) );
+
+	check( 'on "' + mode + '" the garment still changes nothing the engine sees',
+		JSON.stringify( a ) === JSON.stringify( b ) );
+} );
+
+/* And the one mode where it MUST change something. A promise only kept
+   because the feature is broken is not a promise kept. */
+function garmentJob( shirt, extra ) {
+	return studio.settingsForEngine( studio.clampSettings( Object.assign(
+		studio.defaults(),
+		{ halftone: true, screenSource: 'garment', shirt: shirt },
+		extra || {}
+	) ) );
+}
+
+const navyJob = garmentJob( [ 27, 42, 68 ] );
+const whiteJob = garmentJob( [ 255, 255, 255 ] );
+
+check( 'on the garment setting the garment DOES reach the engine',
+	JSON.stringify( navyJob.screenGarment ) === '[27,42,68]' );
+check( 'and two garments are two different jobs',
+	JSON.stringify( navyJob ) !== JSON.stringify( whiteJob ) );
+check( 'a dark garment is assumed to be printed in white ink',
+	JSON.stringify( navyJob.screenInk ) === '[255,255,255]' );
+check( 'a light one in black',
+	JSON.stringify( whiteJob.screenInk ) === '[0,0,0]' );
+check( 'and a chosen ink beats the assumption',
+	JSON.stringify( garmentJob( [ 27, 42, 68 ], {
+		inkEnabled: true, ink: [ 255, 210, 0 ]
+	} ).screenInk ) === '[255,210,0]' );
+
+/* Halftone off means no screening, so there is nothing to measure against and
+   the garment must not be sent even on this mode. */
+check( 'with the screen switched off the garment is not sent at all',
+	studio.settingsForEngine( studio.clampSettings( Object.assign(
+		studio.defaults(), { halftone: false, screenSource: 'garment', shirt: [ 27, 42, 68 ] }
+	) ) ).screenGarment === null );
+
+section( 'typing a colour in' );
+
+const BOOK = [
+	{ name: 'Heather Sapphire', code: 'GD001-HSA', hex: '#4f7fa8' },
+	{ name: 'Heavy Metal', code: 'GD001-HVM', hex: '#5b5f61' },
+	{ name: 'Military Green', code: 'GD001-MIG', hex: '#5a5f3c' }
+];
+
+const parse = ( s ) => studio.parseColour( s, BOOK );
+
+check( 'a six digit hex', JSON.stringify( parse( '#1b2a44' ).rgb ) === '[27,42,68]' );
+check( 'without the hash', JSON.stringify( parse( '1b2a44' ).rgb ) === '[27,42,68]' );
+check( 'a three digit hex is expanded', JSON.stringify( parse( '#f0a' ).rgb ) === '[255,0,170]' );
+check( 'R,G,B numbers', JSON.stringify( parse( '176, 178, 174' ).rgb ) === '[176,178,174]' );
+check( 'out of range channels are brought in', JSON.stringify( parse( '300, -4, 12' ).rgb ) === '[255,0,12]' );
+check( 'four numbers are read as CMYK, not as anything else',
+	JSON.stringify( parse( '0, 100, 100, 0' ).rgb ) === '[255,0,0]' );
+check( 'and are labelled as an approximation',
+	parse( 'cmyk(0,100,100,0)' ).label.indexOf( 'approximate' ) !== -1 );
+check( 'a name from the book', JSON.stringify( parse( 'Military Green' ).rgb ) === '[90,95,60]' );
+check( 'a code from the book', JSON.stringify( parse( 'gd001-mig' ).rgb ) === '[90,95,60]' );
+check( 'the label says which one it matched',
+	parse( 'gd001-mig' ).label === 'Military Green (GD001-MIG)' );
+check( 'a unique start of a name is enough',
+	JSON.stringify( parse( 'Military' ).rgb ) === '[90,95,60]' );
+
+/* The two Heather/Heavy entries exist for this one check. A box that picks
+   the first of two colours somebody might have meant is worse than one that
+   asks, because the wrong garment looks exactly like the right one. */
+check( 'a prefix two colours share is refused, not guessed',
+	! parse( 'Hea' ).rgb && parse( 'Hea' ).error.indexOf( 'More than one' ) === 0 );
+check( 'one more letter and it is no longer a choice',
+	JSON.stringify( parse( 'Heav' ).rgb ) === '[91,95,97]' );
+check( 'a Pantone reference is refused', ! parse( 'Pantone 19-4052 TCX' ).rgb );
+check( 'and says why rather than "not found"',
+	parse( 'PMS 288' ).error.toLowerCase().indexOf( 'pantone' ) !== -1 );
+check( 'a bare TCX style number is caught too',
+	parse( '19-4052' ).error.toLowerCase().indexOf( 'pantone' ) !== -1 );
+check( 'nonsense is refused', ! parse( 'qqqq' ).rgb );
+check( 'an empty box says nothing rather than complaining',
+	! parse( '' ).rgb && parse( '' ).error === '' );
+
+/* The book is data from the shop, so it can contain anything. A row with a
+   broken colour must be ignored rather than turned into black. */
+check( 'a book row with no usable colour is skipped',
+	! studio.parseColour( 'Broken', [ { name: 'Broken', code: '', hex: 'not a colour' } ] ).rgb );
+
 /* ------------------------------------------------------------------ */
 
 Promise.all( run ).then( () => {
@@ -556,8 +661,8 @@ Promise.all( run ).then( () => {
 
 	/* A floor. A test file that stops running looks exactly like one that
 	   passes, and this one is full of async blocks that could silently vanish. */
-	if ( total < 86 ) {
-		fails.push( 'only ' + total + ' checks ran, expected at least 86' );
+	if ( total < 115 ) {
+		fails.push( 'only ' + total + ' checks ran, expected at least 115' );
 	}
 
 	console.log( '\n' + ( fails.length ? fails.length + ' FAILED of ' + total : 'ALL ' + ok + ' PASSED' ) );

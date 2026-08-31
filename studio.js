@@ -21,9 +21,20 @@ function defaults() {
 		adjBlack: 0,
 		adjGamma: 1,
 		adjWhite: 255,
+		brightness: 0,
+		contrast: 0,
 		hue: 0,
 		saturation: 0,
 		lightness: 0,
+
+		/* Photoshop's six colour families. Lightness only - nothing in here
+		   can change what colour something is, only how dark it goes. */
+		lightRed: 0,
+		lightYellow: 0,
+		lightGreen: 0,
+		lightCyan: 0,
+		lightBlue: 0,
+		lightMagenta: 0,
 
 		knockout: [ 0, 0, 0 ],
 
@@ -40,8 +51,8 @@ function defaults() {
 		inkEnabled: false,
 		ink: [ 0, 0, 0 ],
 
-		/* Preview only - never sent to the engine, never printed. Same names
-		   and same values as the web app so the two read alike. */
+		/* Preview only in every screening mode but one - see screenColours().
+		   Same names and same values as the web app so the two read alike. */
 		shirt: [ 0, 0, 0 ],
 		shirtPreview: false,
 
@@ -65,15 +76,69 @@ function defaults() {
 var ENGINE_KEYS = [
 	'dpi',
 	'adjEnabled', 'adjBlack', 'adjGamma', 'adjWhite',
+	'brightness', 'contrast',
 	'hue', 'saturation', 'lightness',
+	'lightRed', 'lightYellow', 'lightGreen', 'lightCyan', 'lightBlue', 'lightMagenta',
 	'knockout',
 	'bgRemove', 'bgTolerance', 'bgSoftness',
 	'halftone', 'lpi', 'angle', 'shape', 'screenSource',
+	'screenGarment', 'screenInk',
 	'inkEnabled', 'ink',
 	'levelsEnabled', 'inBlack', 'inGamma', 'inWhite', 'outBlack', 'outWhite',
 	'microDot', 'cleanupIntensity',
 	'underbase', 'choke'
 ];
+
+/*
+ * The two keys above that are WORKED OUT rather than stored.
+ *
+ * Everything else in ENGINE_KEYS is a setting with a default and a control.
+ * These two are derived from three other settings every time, which is why
+ * they have no entry in defaults() - and why the drift test has to know about
+ * them rather than expecting a default that should not exist.
+ */
+var DERIVED_KEYS = [ 'screenGarment', 'screenInk' ];
+
+function luminance( rgb ) {
+	return ( rgb[ 0 ] * 0.299 + rgb[ 1 ] * 0.587 + rgb[ 2 ] * 0.114 ) / 255;
+}
+
+/**
+ * The ink to assume when nobody has said which one.
+ *
+ * "Print in one ink" is off by default and turning it on is a decision about
+ * the press, so screening must not require it. A separation goes down in one
+ * colour either way, and on anything but a white garment that colour is nearly
+ * always white.
+ */
+function autoInk( garment ) {
+	return luminance( garment ) > 0.5 ? [ 0, 0, 0 ] : [ 255, 255, 255 ];
+}
+
+/**
+ * The two colours the garment screening mode measures against.
+ *
+ * The garment colour is preview only everywhere else and provably never
+ * reaches the engine. This one mode is the exception and has to be: there is
+ * no way to work out how much ink a pixel needs without knowing what it is
+ * going down on to. Returning nulls in every other mode is what keeps that
+ * promise true rather than merely usually true.
+ *
+ * Kept identical to `screenColours()` in the website's dtx.js, and the test
+ * folder compares the two rather than trusting this comment.
+ */
+function screenColours( S ) {
+	if ( 'garment' !== S.screenSource || ! S.halftone ) {
+		return { garment: null, ink: null };
+	}
+
+	var garment = S.shirt.slice();
+
+	return {
+		garment: garment,
+		ink: S.inkEnabled ? S.ink.slice() : autoInk( garment )
+	};
+}
 
 function settingsForEngine( S ) {
 	var out = {};
@@ -81,6 +146,11 @@ function settingsForEngine( S ) {
 	ENGINE_KEYS.forEach( function ( k ) {
 		out[ k ] = S[ k ];
 	} );
+
+	var colours = screenColours( S );
+
+	out.screenGarment = colours.garment;
+	out.screenInk = colours.ink;
 
 	return out;
 }
@@ -109,6 +179,15 @@ function clampSettings( S ) {
 	out.microDot = Math.min( 10, Math.max( 0, Number( out.microDot ) || 0 ) );
 	out.cleanupIntensity = Math.min( 10, Math.max( 0, Number( out.cleanupIntensity ) || 0 ) );
 	out.choke = Math.min( 20, Math.max( 0, Number( out.choke ) || 0 ) );
+
+	/* The brightness/contrast pair go into a lookup table and the six colour
+	   sliders into a per-hue table. A NaN from a hand-edited preset would
+	   propagate through either one and come out as a black pixel rather than
+	   as an error, so they are numbers or they are zero. */
+	[ 'brightness', 'contrast', 'lightRed', 'lightYellow', 'lightGreen',
+		'lightCyan', 'lightBlue', 'lightMagenta' ].forEach( function ( key ) {
+		out[ key ] = Math.min( 100, Math.max( -100, Number( out[ key ] ) || 0 ) );
+	} );
 
 	if ( ! Array.isArray( out.knockout ) || 3 !== out.knockout.length ) {
 		out.knockout = [ 0, 0, 0 ];
@@ -139,6 +218,150 @@ function clampSettings( S ) {
 	}
 
 	return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Typing a colour in                                                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Codes that name a colour in a book we do not have. Worth recognising
+ * precisely so it can be turned down properly, because the failure that matters
+ * here is not "no match" - it is guessing, and sending somebody a garment that
+ * is nearly the right navy.
+ */
+var LICENSED = /pantone|\bpms\b|\btcx\b|\btpg\b|\btpx\b|^\d{2}\s*-\s*\d{4}$/i;
+
+function hexToRgb( s ) {
+	var m = /^#?([0-9a-f]{6})$/i.exec( String( s ).trim() );
+
+	if ( ! m ) {
+		return null;
+	}
+
+	var n = parseInt( m[ 1 ], 16 );
+
+	return [ ( n >> 16 ) & 255, ( n >> 8 ) & 255, n & 255 ];
+}
+
+/**
+ * Turn whatever was typed into an RGB triple, or say why not.
+ *
+ * Returns { rgb, label } on success and { error } otherwise. There is
+ * deliberately no "closest match" path: for somebody choosing a garment to
+ * print on, a colour that is nearly right is worse than no answer, because a
+ * wrong answer looks exactly like a right one.
+ *
+ * Same rules as the website's box, and the test folder checks a list of inputs
+ * against both rather than trusting this sentence.
+ *
+ * @param {string} raw  What was typed.
+ * @param {Array}  book Entries of { name, code, hex }.
+ * @return {Object}
+ */
+function parseColour( raw, book ) {
+	var s = String( raw || '' ).trim();
+
+	if ( ! s ) {
+		return { error: '' };
+	}
+
+	var lower = s.toLowerCase();
+	var list = ( book || [] ).filter( function ( e ) {
+		return e && e.hex && hexToRgb( e.hex );
+	} );
+	var i, e, hit;
+
+	/* Names and codes first. A supplier code can be six characters of hex by
+	   coincidence, and the book is the more specific answer. */
+	for ( i = 0; i < list.length; i++ ) {
+		e = list[ i ];
+
+		if ( String( e.name ).toLowerCase() === lower ||
+			( e.code && String( e.code ).toLowerCase() === lower ) ) {
+			return {
+				rgb: hexToRgb( e.hex ),
+				label: e.name + ( e.code ? ' (' + e.code + ')' : '' )
+			};
+		}
+	}
+
+	hit = null;
+
+	for ( i = 0; i < list.length; i++ ) {
+		e = list[ i ];
+
+		if ( String( e.name ).toLowerCase().indexOf( lower ) === 0 ||
+			( e.code && String( e.code ).toLowerCase().indexOf( lower ) === 0 ) ) {
+			/* Two colours starting the same way is not a match, it is a choice,
+			   and this box must not make it on their behalf. */
+			if ( hit && hit.hex !== e.hex ) {
+				return { error: 'More than one colour starts with "' + s + '". Type more of the name.' };
+			}
+
+			hit = e;
+		}
+	}
+
+	if ( hit ) {
+		return {
+			rgb: hexToRgb( hit.hex ),
+			label: hit.name + ( hit.code ? ' (' + hit.code + ')' : '' )
+		};
+	}
+
+	var m = /^#?([0-9a-f]{6})$/i.exec( s );
+
+	if ( m ) {
+		return { rgb: hexToRgb( m[ 1 ] ), label: '#' + m[ 1 ].toLowerCase() };
+	}
+
+	m = /^#?([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec( s );
+
+	if ( m ) {
+		var full = m[ 1 ] + m[ 1 ] + m[ 2 ] + m[ 2 ] + m[ 3 ] + m[ 3 ];
+
+		return { rgb: hexToRgb( full ), label: '#' + full.toLowerCase() };
+	}
+
+	var nums = s.match( /-?\d+(?:\.\d+)?/g ) || [];
+	var n;
+
+	if ( ( /^\s*cmyk/i.test( s ) || 4 === nums.length ) && 4 === nums.length ) {
+		n = nums.map( function ( v ) {
+			return Math.max( 0, Math.min( 100, parseFloat( v ) ) ) / 100;
+		} );
+
+		/* Plain arithmetic, no colour management. It is right enough to look at
+		   and it is labelled as an approximation, because a real CMYK
+		   conversion needs the press profile and there is not one here. */
+		return {
+			rgb: [
+				Math.round( 255 * ( 1 - n[ 0 ] ) * ( 1 - n[ 3 ] ) ),
+				Math.round( 255 * ( 1 - n[ 1 ] ) * ( 1 - n[ 3 ] ) ),
+				Math.round( 255 * ( 1 - n[ 2 ] ) * ( 1 - n[ 3 ] ) )
+			],
+			label: 'CMYK ' + nums.join( ' / ' ) + ' (approximate)'
+		};
+	}
+
+	if ( 3 === nums.length ) {
+		n = nums.map( function ( v ) {
+			return Math.max( 0, Math.min( 255, Math.round( parseFloat( v ) ) ) );
+		} );
+
+		return { rgb: n, label: 'RGB ' + n.join( ', ' ) };
+	}
+
+	if ( LICENSED.test( s ) ) {
+		return {
+			error: '"' + s + '" is not in your colour book. Pantone will not let us ship their ' +
+				'numbers, and guessing one would give you a garment that is nearly right - so add ' +
+				'it to the book once with the colour beside it and it will work from then on.'
+		};
+	}
+
+	return { error: 'Not recognised. Try a name from the list, a hex code like #1b2a44, R,G,B numbers, or four CMYK percentages.' };
 }
 
 /**
@@ -265,6 +488,10 @@ function preview( deps, S, opts ) {
 module.exports = {
 	defaults: defaults,
 	ENGINE_KEYS: ENGINE_KEYS,
+	DERIVED_KEYS: DERIVED_KEYS,
+	screenColours: screenColours,
+	autoInk: autoInk,
+	parseColour: parseColour,
 	settingsForEngine: settingsForEngine,
 	clampSettings: clampSettings,
 	PREVIEW_MAX_SIDE: PREVIEW_MAX_SIDE,

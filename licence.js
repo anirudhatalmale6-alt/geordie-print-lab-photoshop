@@ -193,7 +193,14 @@ function ask( fetchImpl, key, device ) {
 				reason: r.body.reason || ( r.body.valid ? 'ok' : 'refused' ),
 				plan: r.body.plan || '',
 				expires: r.body.expires || '',
-				trial: !! r.body.trial
+				trial: !! r.body.trial,
+
+				/* Two things the shop knows and the panel cannot: how many AI
+				   upscales this key has left, and the shop's own garment
+				   colours. Both come back on a call the panel already makes, so
+				   neither costs a round trip. */
+				upscales: r.body.upscales || null,
+				garments: Array.isArray( r.body.garments ) ? r.body.garments : []
 			};
 		} )
 		.catch( function ( e ) {
@@ -271,7 +278,9 @@ function check( deps, candidate ) {
 					var info = {
 						plan: r.plan,
 						expires: r.expires,
-						trial: r.trial
+						trial: r.trial,
+						upscales: r.upscales,
+						garments: r.garments
 					};
 
 					return Promise.all( [
@@ -361,9 +370,27 @@ function signOut( store ) {
 	] );
 }
 
+/**
+ * The key currently stored, or ''.
+ *
+ * The AI upscale endpoints take the key as the credential - there is no
+ * logged-in session inside Photoshop - so the panel needs to read it back out.
+ * Through a function rather than by exposing the storage name, so there is one
+ * place that knows where it lives.
+ *
+ * @param {Object} store A store from makeStore().
+ * @return {Promise<string>}
+ */
+function storedKey( store ) {
+	return store.get( K_KEY ).then( function ( k ) {
+		return k || '';
+	} );
+}
+
 module.exports = {
 	ENDPOINT: ENDPOINT,
 	GRACE_DAYS: GRACE_DAYS,
+	storedKey: storedKey,
 	makeStore: makeStore,
 	normalise: normalise,
 	pretty: pretty,

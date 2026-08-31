@@ -47,6 +47,30 @@ account signed in, which is why this is the one step I cannot do for
 you. It takes about a minute once the developer tool is installed.
 
 
+THE AI UPSCALE
+--------------
+
+The AI upscale button sends the layer to the shop, which sends it to the
+upscaler and sends the bigger version back. It then makes the DOCUMENT
+bigger and replaces the layer with it - there is nowhere else for the
+extra pixels to go.
+
+Two things follow from that, and both are on purpose:
+
+- It changes the whole document, not just the layer. Save first if you
+  want the original at the old size.
+- It is one undo step. Ctrl+Z / Cmd+Z puts it back.
+
+The count under the button is how many you have left this month, and it
+comes from the shop rather than being guessed at here. If a job is
+refused, nothing is written to the document and nothing is counted.
+
+This is the one part of the plugin I could not run against a real
+document - it needs Photoshop, which I do not have. Everything up to and
+including what is handed to Photoshop is tested. Try it on a copy of a
+file the first time.
+
+
 IF SOMETHING IS WRONG
 ---------------------
 

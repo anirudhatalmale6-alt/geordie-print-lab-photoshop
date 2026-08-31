@@ -113,6 +113,19 @@ const randomHex = ( n ) => {
 	}
 
 	console.log( '\n' + ( fails.length ? fails.length + ' FAILED of ' + ( ok + fails.length ) : 'LIVE LICENCE: ALL ' + ok + ' PASSED' ) );
+
+	/*
+	 * This run claimed both of that key's two device slots on the LIVE shop -
+	 * that is how the "a third machine is refused" check is made true, and
+	 * there is no way to release them from out here. Left claimed, the real
+	 * owner of the key cannot install the plugin and is told they are already
+	 * on two computers, which is a maddening thing to be told when you are not.
+	 */
+	console.log(
+		'\nCLEAN UP: this run took both device slots on ' + KEY + '.\n' +
+		'Release them on the server or the owner of that key cannot install:\n' +
+		"  wp eval 'delete_user_meta( BPT_Licence::user_for_key( \"" + KEY + "\" ), \"_bpt_licence_devices\" );'"
+	);
 	fails.forEach( ( f ) => console.log( ' - ' + f ) );
 	process.exit( fails.length ? 1 : 0 );
 } )().catch( ( e ) => {

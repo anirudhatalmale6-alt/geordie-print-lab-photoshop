@@ -61,6 +61,43 @@
 		}
 	}
 
+	/**
+	 * Brightness and contrast, folded into a lookup that already exists.
+	 *
+	 * Both of these are per-channel functions of one input value, exactly like
+	 * levels, so pushing the levels table through them costs 256 operations and
+	 * leaves Image Adjustments as a single pass over the pixels. Doing it as its
+	 * own pass would be a second walk of the whole image for no benefit.
+	 *
+	 * Brightness is a straight offset in levels: +30 means thirty levels out of
+	 * 255, which is a number you can predict rather than a curve you have to
+	 * feel your way around. Contrast pivots on mid grey, so it opens the ends
+	 * out without moving the middle - the same behaviour Photoshop's has.
+	 *
+	 * Brightness is applied first, which is the order Photoshop uses, and it
+	 * matters: contrast afterwards amplifies the offset rather than ignoring it.
+	 */
+	function brightContrast( lut, brightness, contrast ) {
+		if ( ! brightness && ! contrast ) {
+			return lut;
+		}
+
+		/* -100..100 mapped onto -128..128 before the standard contrast factor,
+		   which gives a useful range - about a third at the bottom end and about
+		   three times at the top. The full -255..255 mapping is unusable: the top
+		   of the slider would be a factor of 130 and everything but mid grey
+		   would clip. */
+		var cc = contrast * 1.28;
+		var f = ( 259 * ( cc + 255 ) ) / ( 255 * ( 259 - cc ) );
+		var i;
+
+		for ( i = 0; i < 256; i++ ) {
+			lut[ i ] = clamp255( Math.round( f * ( lut[ i ] + brightness - 128 ) + 128 ) );
+		}
+
+		return lut;
+	}
+
 	/* ------------------------------------------------------------------ */
 	/* Hue / saturation / lightness                                        */
 	/* ------------------------------------------------------------------ */
@@ -144,6 +181,114 @@
 			l = clamp01( hsl[ 2 ] + lShift );
 
 			hslToRgb( h, s, l, rgb );
+
+			data[ i ] = rgb[ 0 ];
+			data[ i + 1 ] = rgb[ 1 ];
+			data[ i + 2 ] = rgb[ 2 ];
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* Brightness of one colour at a time                                  */
+	/* ------------------------------------------------------------------ */
+
+	/*
+	 * The six hue families Photoshop uses, in degrees. They are 60 apart, which
+	 * is what makes the weighting below add up to exactly one.
+	 */
+	var BANDS = [ 0, 60, 120, 180, 240, 300 ];
+
+	/**
+	 * How much to lift or drop the lightness at each of the 360 hues.
+	 *
+	 * A hue is not a category - orange is genuinely half red and half yellow -
+	 * so each band's pull falls off linearly to nothing 60 degrees away. With
+	 * the centres 60 apart that means exactly two bands reach any given hue and
+	 * their weights sum to 1: no hue is counted twice and none is missed, which
+	 * a set of hard boundaries could not promise. Pure orange with reds at -50
+	 * and yellows at 0 lands on -25, which is what the eye expects.
+	 *
+	 * Built once per run as a 360-entry table rather than recomputed per pixel:
+	 * six distances and a wrap for every pixel of a 1500px proxy is millions of
+	 * operations for 360 distinct answers.
+	 */
+	function bandTable( amounts ) {
+		var table = new Float32Array( 360 );
+		var deg, k, d, total;
+
+		for ( deg = 0; deg < 360; deg++ ) {
+			total = 0;
+
+			for ( k = 0; k < 6; k++ ) {
+				d = Math.abs( deg - BANDS[ k ] );
+
+				if ( d > 180 ) {
+					d = 360 - d;
+				}
+
+				if ( d < 60 ) {
+					total += ( 1 - d / 60 ) * ( amounts[ k ] || 0 ) / 100;
+				}
+			}
+
+			table[ deg ] = total;
+		}
+
+		return table;
+	}
+
+	/**
+	 * Lighten or darken one colour family without touching the others.
+	 *
+	 * The shift is multiplied by saturation on purpose. A grey pixel has no hue
+	 * to belong to - whatever `rgbToHsl` returns for it is an artefact of which
+	 * channel happened to be largest - so letting the reds slider move greys
+	 * would move them by whichever way the rounding fell. Weighting by
+	 * saturation makes the effect fade out exactly as the colour does.
+	 */
+	function applyBandLight( data, amounts ) {
+		var k, any = false;
+
+		for ( k = 0; k < 6; k++ ) {
+			if ( amounts[ k ] ) {
+				any = true;
+			}
+		}
+
+		if ( ! any ) {
+			return;
+		}
+
+		var table = bandTable( amounts );
+		var hsl = [ 0, 0, 0 ];
+		var rgb = [ 0, 0, 0 ];
+		var i, deg, shift, l;
+
+		for ( i = 0; i < data.length; i += 4 ) {
+			if ( data[ i + 3 ] === 0 ) {
+				continue;
+			}
+
+			rgbToHsl( data[ i ], data[ i + 1 ], data[ i + 2 ], hsl );
+
+			/* `rgbToHsl` cannot return 1, but a read one past the end of a
+			   typed array is `undefined` and turns the pixel black rather than
+			   throwing, so the wrap is not left to trust. */
+			deg = ( hsl[ 0 ] * 360 ) | 0;
+
+			if ( deg > 359 ) {
+				deg = 359;
+			}
+
+			shift = table[ deg ] * hsl[ 1 ];
+
+			if ( shift === 0 ) {
+				continue;
+			}
+
+			l = clamp01( hsl[ 2 ] + shift );
+
+			hslToRgb( hsl[ 0 ], hsl[ 1 ], l, rgb );
 
 			data[ i ] = rgb[ 0 ];
 			data[ i + 1 ] = rgb[ 1 ];
@@ -288,9 +433,29 @@
 	 *   dark    - screen ink density for dark ink on a light garment. A white
 	 *             pixel needs no ink, a black one needs all of it.
 	 *   white   - the same idea inverted, for white ink on a dark garment.
+	 *   garment - work it out from the two colours that actually decide it: the
+	 *             garment being printed on and the ink going down. See below.
 	 *
 	 * Alpha is always multiplied in on top, so a transparent pixel stays
 	 * transparent whichever mode you pick.
+	 *
+	 * WHY `garment` EXISTS
+	 *
+	 * `dark` and `white` are the same question asked about the two ends of the
+	 * scale, and they are only right at those two ends. On a sport grey tee
+	 * neither is: `dark` says a mid grey pixel needs half the ink, when on a
+	 * garment that is already that grey it needs none at all. Anything printed
+	 * on red, navy or bottle green has the same problem, which is the whole of
+	 * "it only works on white and black shirts".
+	 *
+	 * The honest answer does not need a mode at all, it needs the two colours.
+	 * Coverage is where the pixel sits on the line from the garment colour to
+	 * the ink colour: on the garment it is 0 and no dot is laid, on the ink it
+	 * is 1 and the dot is solid, and in between it is the dot percentage. It is
+	 * a projection rather than a distance, so a pixel that is off to the side of
+	 * that line - a colour this one ink cannot reproduce at all - resolves to
+	 * the nearest amount of ink that this ink can actually make, instead of
+	 * being read as a large amount of it.
 	 */
 	function halftone( data, w, h, opts ) {
 		var cell = opts.cell;
@@ -301,12 +466,33 @@
 		var cos = Math.cos( rad );
 		var sin = Math.sin( rad );
 		var invCell = 1 / cell;
+		var gr = 0, gg = 0, gb = 0, dr = 0, dg = 0, db = 0, invLen = 0;
 		var x, y, i, a, lum, base, cov, u, v, cu, cv, c;
 
 		if ( cell < 1.2 ) {
 			// Below about a pixel and a bit per cell there is no dot to draw -
 			// screening here would just add noise, so leave it alone.
 			return;
+		}
+
+		if ( mode === 'garment' ) {
+			var g = opts.garment;
+			var k = opts.ink;
+
+			gr = g[ 0 ]; gg = g[ 1 ]; gb = g[ 2 ];
+			dr = k[ 0 ] - gr; dg = k[ 1 ] - gg; db = k[ 2 ] - gb;
+
+			var len = dr * dr + dg * dg + db * db;
+
+			/* Ink the same colour as the garment. There is no line to project
+			   onto and no print to make either, so rather than divide by zero
+			   fall back to the behaviour that at least still produces a
+			   separation. */
+			if ( len < 1 ) {
+				mode = 'dark';
+			} else {
+				invLen = 1 / len;
+			}
 		}
 
 		for ( y = 0; y < h; y++ ) {
@@ -320,6 +506,12 @@
 
 				if ( mode === 'opacity' ) {
 					base = 1;
+				} else if ( mode === 'garment' ) {
+					base = clamp01( (
+						( data[ i ] - gr ) * dr +
+						( data[ i + 1 ] - gg ) * dg +
+						( data[ i + 2 ] - gb ) * db
+					) * invLen );
 				} else {
 					lum = ( data[ i ] * 0.299 + data[ i + 1 ] * 0.587 + data[ i + 2 ] * 0.114 ) / 255;
 					base = mode === 'white' ? lum : 1 - lum;
@@ -561,11 +753,26 @@
 	function run( data, w, h, s, scale ) {
 		var lut;
 
-		// 1. Image adjustments - levels, then hue/saturation.
+		// 1. Image adjustments - levels with brightness and contrast folded into
+		//    the same lookup, then hue/saturation, then the per-colour
+		//    brightness. Order matters: the colour bands are asked which hue a
+		//    pixel is, so they have to run after anything that moves hues.
 		if ( s.adjEnabled ) {
-			lut = levelsLut( s.adjBlack, s.adjWhite, s.adjGamma, 0, 255 );
+			lut = brightContrast(
+				levelsLut( s.adjBlack, s.adjWhite, s.adjGamma, 0, 255 ),
+				s.brightness || 0,
+				s.contrast || 0
+			);
 			applyLut( data, lut );
 			applyHsl( data, s.hue, s.saturation, s.lightness );
+			applyBandLight( data, [
+				s.lightRed || 0,
+				s.lightYellow || 0,
+				s.lightGreen || 0,
+				s.lightCyan || 0,
+				s.lightBlue || 0,
+				s.lightMagenta || 0
+			] );
 		}
 
 		// 2. Background removal, using the knockout colour from Shirt Color.
@@ -575,11 +782,23 @@
 
 		// 3. Halftone screen.
 		if ( s.halftone ) {
+			var source = s.screenSource;
+
+			/* A project saved before the garment mode existed can name it - the
+			   settings are stored by name - but carries neither colour. Falling
+			   back is the only option that reopens that project as it was
+			   rather than as a black rectangle. */
+			if ( 'garment' === source && ! ( s.screenGarment && s.screenInk ) ) {
+				source = 'dark';
+			}
+
 			halftone( data, w, h, {
 				cell: Math.max( 1, ( s.dpi / s.lpi ) * scale ),
 				angle: s.angle,
 				shape: s.shape,
-				source: s.screenSource
+				source: source,
+				garment: s.screenGarment,
+				ink: s.screenInk
 			} );
 		}
 

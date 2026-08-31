@@ -48,9 +48,38 @@
 		<label class="row">Colour
 			<input id="shirt-hex" type="text" class="hex" data-hex="shirt" spellcheck="false" maxlength="7">
 		</label>
+
+		<!-- For the colours the sixteen swatches do not cover, which in a print
+		     shop is most of them: a code off an order, a hex a customer sent,
+		     CMYK off a spec sheet. -->
+		<label class="row">Code
+			<input id="code-in" type="text" list="colour-book" spellcheck="false"
+				placeholder="Name, code, #1b2a44, 27,42,68 or CMYK">
+		</label>
+		<datalist id="colour-book"></datalist>
+		<div class="actions actions--tight">
+			<button id="code-use">Use that colour</button>
+		</div>
+		<p id="code-msg" class="msg small dim"></p>
+
 		<p id="garment-note" class="msg small warn hidden">This artwork has no see-through areas yet, so it is covering the garment. Knock the background out or screen it first.</p>
-		<p class="dim small">The colour of the shirt you are printing on. On screen only - it is never written into your document.</p>
+		<p class="dim small">The colour of the shirt you are printing on. On screen only - it is never written into your document. The one exception is deliberate: set Screen from to "Match the garment and ink" below and the dots are worked out from this colour, because how much ink a pixel needs depends on what is underneath it.</p>
 	</div>
+
+	<details>
+		<summary>AI upscale</summary>
+		<p class="dim small">Redraws real detail rather than stretching what is there. It never invents faces or lettering that were not in your file. The layer is replaced with the bigger version.</p>
+		<label class="row">Enlarge by
+			<select id="ai-scale">
+				<option value="2">2x</option>
+				<option value="4" selected>4x</option>
+			</select>
+		</label>
+		<div class="actions actions--tight">
+			<button id="ai-go" class="primary">AI upscale this layer</button>
+		</div>
+		<p id="ai-msg" class="msg small dim"></p>
+	</details>
 
 	<details open>
 		<summary>Halftone</summary>
@@ -64,14 +93,23 @@
 				<option value="ellipse">Ellipse</option>
 				<option value="square">Square</option>
 				<option value="line">Line</option>
+				<option value="diamond">Diamond</option>
 			</select>
 		</label>
+
+		<!-- These are the website's four, value for value. This panel used to
+		     offer "dark" and "luma", and "luma" is not a value the engine has
+		     ever read - it fell through to the dark behaviour, so two different
+		     settings did the same thing and said nothing. -->
 		<label class="row">Screen from
 			<select data-k="screenSource">
-				<option value="dark">Dark areas</option>
-				<option value="luma">Brightness</option>
+				<option value="garment">Match the garment and ink</option>
+				<option value="dark">Dark ink on a light garment</option>
+				<option value="white">White ink on a dark garment</option>
+				<option value="opacity">Artwork opacity only</option>
 			</select>
 		</label>
+		<p id="screen-msg" class="msg small dim"></p>
 
 		<p class="cap">Ink colour</p>
 		<label class="row"><input type="checkbox" data-k="inkEnabled"> Print in one ink</label>
@@ -79,7 +117,7 @@
 			<input id="ink-hex" type="text" class="hex" data-hex="ink" spellcheck="false" maxlength="7">
 		</label>
 		<div id="swatches" class="swatches"></div>
-		<p class="dim small">A screen prints one colour. This only changes the colour of the dots, never where they fall.</p>
+		<p class="dim small">A screen prints one colour. On every setting of Screen from except the garment one, this changes the colour of the dots and nothing else. On the garment setting it is one of the two colours the dots are worked out from, so it does move them.</p>
 	</details>
 
 	<details>
@@ -88,9 +126,25 @@
 		<label class="row">Black <input type="range" data-k="adjBlack" min="0" max="254" step="1"><output data-o="adjBlack"></output></label>
 		<label class="row">Gamma <input type="range" data-k="adjGamma" min="0.1" max="3" step="0.05"><output data-o="adjGamma"></output></label>
 		<label class="row">White <input type="range" data-k="adjWhite" min="1" max="255" step="1"><output data-o="adjWhite"></output></label>
+
+		<p class="cap">Brightness / contrast</p>
+		<label class="row">Brightness <input type="range" data-k="brightness" min="-100" max="100" step="1"><output data-o="brightness"></output></label>
+		<label class="row">Contrast <input type="range" data-k="contrast" min="-100" max="100" step="1"><output data-o="contrast"></output></label>
+		<p class="dim small">Brightness moves everything by that many levels out of 255. Contrast pushes the light and dark apart around mid grey, so the middle stays put.</p>
+
+		<p class="cap">Hue / saturation</p>
 		<label class="row">Hue <input type="range" data-k="hue" min="-180" max="180" step="1"><output data-o="hue"></output></label>
 		<label class="row">Saturation <input type="range" data-k="saturation" min="-100" max="100" step="1"><output data-o="saturation"></output></label>
 		<label class="row">Lightness <input type="range" data-k="lightness" min="-100" max="100" step="1"><output data-o="lightness"></output></label>
+
+		<p class="cap">Brightness by colour</p>
+		<label class="row"><i class="chip" style="background:#ff0000"></i> Reds <input type="range" data-k="lightRed" min="-100" max="100" step="1"><output data-o="lightRed"></output></label>
+		<label class="row"><i class="chip" style="background:#ffff00"></i> Yellows <input type="range" data-k="lightYellow" min="-100" max="100" step="1"><output data-o="lightYellow"></output></label>
+		<label class="row"><i class="chip" style="background:#00ff00"></i> Greens <input type="range" data-k="lightGreen" min="-100" max="100" step="1"><output data-o="lightGreen"></output></label>
+		<label class="row"><i class="chip" style="background:#00ffff"></i> Cyans <input type="range" data-k="lightCyan" min="-100" max="100" step="1"><output data-o="lightCyan"></output></label>
+		<label class="row"><i class="chip" style="background:#0000ff"></i> Blues <input type="range" data-k="lightBlue" min="-100" max="100" step="1"><output data-o="lightBlue"></output></label>
+		<label class="row"><i class="chip" style="background:#ff00ff"></i> Magentas <input type="range" data-k="lightMagenta" min="-100" max="100" step="1"><output data-o="lightMagenta"></output></label>
+		<p class="dim small">The same six as Photoshop. Each one lightens or darkens just that family of colours and nothing else. Greys are left alone on purpose - a grey pixel has no colour to belong to.</p>
 	</details>
 
 	<details>

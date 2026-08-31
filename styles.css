@@ -251,9 +251,33 @@ button:disabled {
 	opacity: 0.55;
 }
 
+/* The colour dot beside "Reds", "Yellows" and so on. Pure hue, because it is
+   answering "does my artwork count as this one" and a softened swatch answers
+   it wrongly - which is also why it carries its own outline: pure blue on this
+   panel's background is very nearly the background, and a dot you cannot see
+   is not a label. */
+.chip {
+	flex: 0 0 auto;
+	width: 8px;
+	height: 8px;
+	border: 1px solid rgba(255, 255, 255, 0.45);
+	border-radius: 50%;
+}
+
+/* A row of text fields wants a full width input; a row that is one button
+   under the field it belongs to does not. */
+.row input[type="text"]:not(.hex) {
+	flex: 1;
+	min-width: 60px;
+}
+
 .actions {
 	display: flex;
 	gap: 6px;
+}
+
+.actions--tight {
+	margin: 4px 0 2px;
 }
 
 .actions .primary {

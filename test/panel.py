@@ -91,14 +91,48 @@ const photoshop = {
     },
     putPixels: (o) => { window.__calls.push({ putPixels: o.layerID }); return Promise.resolve(); }
   },
-  action: { addNotificationListener: () => {} }
+  action: {
+    addNotificationListener: () => {},
+    /* Resizing is the only thing the plugin asks Photoshop to DO rather than
+       read or write, so the stub actually changes the document - a stub that
+       resolved and left DOC alone would let a broken resize pass. */
+    batchPlay: (steps) => {
+      window.__calls.push({ batchPlay: steps[0]._obj });
+      if (window.__resizeRefuses) { return Promise.resolve([{}]); }
+      if (steps[0]._obj === 'imageSize') {
+        DOC.width = steps[0].width._value;
+        DOC.height = steps[0].height._value;
+      }
+      return Promise.resolve([{}]);
+    }
+  }
 };
 
 const uxp = { storage: {} };   // no secureStorage -> exercises the localStorage fallback
 
 window.localStorage.clear();
 
+/* A 2x2 red PNG, so the upscale reply is a real image the panel has to decode
+   rather than a string it is trusted to have handled. */
+window.__upscalePng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR4nGP8z8Dwn4GBgYkBBTAyAAAsKgIBjMHUsAAAAABJRU5ErkJggg==';
+window.__upscaleReply = null;
+
 window.fetch = (url, opts) => {
+  if (String(url).indexOf('/upscale') !== -1) {
+    /* The body here is a multipart byte array, not JSON. Recorded as bytes so
+       the test can prove the key and the scale really went up with it. */
+    const bytes = opts.body;
+    let text = '';
+    for (let i = 0; i < Math.min(bytes.length, 4000); i++) {
+      text += String.fromCharCode(bytes[i]);
+    }
+    window.__calls.push({ upscale: url, type: opts.headers['Content-Type'],
+                          head: text, size: bytes.length });
+    const r = window.__upscaleReply ||
+      { ok: true, left: 6, image: window.__upscalePng };
+    return Promise.resolve({ status: 200, json: () => Promise.resolve(r) });
+  }
+
   window.__calls.push({ fetch: url, body: JSON.parse(opts.body) });
   const r = window.__licenceReply;
   if (r === 'network') return Promise.reject(new Error('down'));
@@ -412,6 +446,194 @@ with sync_playwright() as p:
       .map(e => (e.tagName + ':' + (e.value || e.textContent || '').trim()))""")
     check("nothing on the panel is cut off" + (" (%s)" % clipped if clipped else ""), not clipped)
 
+    # --- the colour work ------------------------------------------------
+    print("\n  colour controls")
+
+    # Sections are collapsed by default, and a control inside a shut <details>
+    # is present but invisible - which reads to a test driver exactly like a
+    # control that is not there.
+    pg.evaluate("() => document.querySelectorAll('details').forEach(d => { d.open = true; })")
+
+    # The guard tests above leave the stub document in whatever state proved
+    # the last refusal - CMYK, locked, and so on. Put it back, or everything
+    # below is testing the blocker again by accident and passing for the
+    # wrong reason.
+    pg.evaluate("""() => {
+        window.__noDoc = false;
+        Object.assign(window.__doc, {
+            mode: 'RGBColor', bitsPerChannel: 8, width: 1200, height: 900,
+            activeLayers: [ { id: 3, name: 'Layer 1', kind: 'pixel', locked: false } ]
+        });
+    }""")
+    pg.wait_for_timeout(200)
+    check("the stub document is usable again before the colour tests",
+          pg.evaluate("""() => {
+              const { Bridge } = require('bridge.js');
+              return new Bridge(require('photoshop')).blocker();
+          }""") == "")
+
+    # Every value the Screen from dropdown offers has to be one the ENGINE
+    # actually reads. This panel used to offer "luma", which the engine has
+    # never heard of - it fell through to the dark behaviour, so two settings
+    # did the same thing and nothing said so.
+    src_opts = pg.eval_on_selector_all(
+        '[data-k="screenSource"] option', "els => els.map(e => e.value)")
+    engine_src = open(os.path.join(ROOT, "engine.js"), encoding="utf-8").read()
+    unread = [
+        v for v in src_opts
+        if not re.search(r"mode === '%s'" % re.escape(v), engine_src)
+        and v not in ("dark",)          # 'dark' is the fall-through branch
+    ]
+    check("every Screen from option is one the engine reads"
+          + (" (%s)" % unread if unread else ""), not unread)
+    check("all four screening modes are offered", len(src_opts) == 4)
+
+    for key in ["brightness", "contrast", "lightRed", "lightYellow",
+                "lightGreen", "lightCyan", "lightBlue", "lightMagenta"]:
+        assert key in defaults, key
+    check("the eight new adjustment sliders are on the panel",
+          all(pg.locator('[data-k="%s"]' % k).count() == 1 for k in
+              ["brightness", "contrast", "lightRed", "lightYellow",
+               "lightGreen", "lightCyan", "lightBlue", "lightMagenta"]))
+    check("each colour slider has its colour beside it",
+          pg.locator("#tool .chip").count() == 6)
+
+    # Sign back in - the sign-out at the end of the previous block has not
+    # happened yet, so the tool is still open.
+    pg.select_option('[data-k="screenSource"]', "garment")
+    pg.wait_for_timeout(200)
+    pg.click('#garments button[data-g="#1b2a44"]')     # navy
+    pg.wait_for_timeout(300)
+
+    note = pg.inner_text("#screen-msg").lower()
+    check("the panel says which garment the dots come from", "1b2a44" in note, )
+    check("and which ink, saying plainly that it assumed it",
+          "ffffff" in note and "assumed" in note, )
+
+    # On this one mode the garment is an INPUT to the engine, so the cached
+    # preview is now a picture of a different job. Repainting it under a new
+    # backdrop would show a separation that was never worked out for this
+    # garment, which is worse than showing nothing - it looks finished.
+    pg.click('#garments button[data-g="#b5202e"]')     # red
+    pg.wait_for_timeout(300)
+    check("changing the garment on that mode says to preview again, "
+          "rather than repainting a preview of the old one",
+          "press preview again" in pg.inner_text("#pv-msg").lower())
+
+    pg.select_option('[data-k="screenSource"]', "dark")
+    pg.wait_for_timeout(200)
+    check("and on any other mode the note goes away",
+          pg.inner_text("#screen-msg").strip() == "")
+
+    # --- typing a colour in ---------------------------------------------
+    def use_code(text):
+        pg.fill("#code-in", text)
+        pg.click("#code-use")
+        pg.wait_for_timeout(200)
+        return (pg.input_value("#shirt-hex").lower(), pg.inner_text("#code-msg"))
+
+    got, _ = use_code("#1c4b3c")
+    check("a hex code sets the garment", got == "#1c4b3c")
+    got, _ = use_code("176, 178, 174")
+    check("R,G,B numbers set the garment", got == "#b0b2ae")
+    got, msg = use_code("Maroon")
+    check("a stock name sets the garment", got == "#6a2431")
+    got, msg = use_code("cmyk(0,100,100,0)")
+    check("CMYK is converted and called approximate",
+          got == "#ff0000" and "approx" in msg.lower())
+
+    before = pg.input_value("#shirt-hex").lower()
+    got, msg = use_code("Pantone 19-4052 TCX")
+    check("a Pantone reference is refused rather than guessed at",
+          got == before and "pantone" in msg.lower())
+    got, msg = use_code("qqqq")
+    check("and so is anything else it cannot read",
+          got == before and "not recognised" in msg.lower())
+
+    # --- AI upscale ------------------------------------------------------
+    print("\n  AI upscale")
+
+    # The stubbed licence reply carries no allowance, so the shop has not
+    # said. That is not "none left" and must not read as a refusal.
+    check("with no allowance yet the button waits rather than refusing",
+          pg.is_disabled("#ai-go") and "checking" in pg.inner_text("#ai-msg").lower())
+
+    pg.evaluate("""() => {
+        window.__licenceReply = Object.assign({}, window.__licenceReply, {
+            upscales: { left: 7, monthly: 20, used: 13, extra: 0, period: '2026-08' },
+            garments: [ { name: 'Heather Sapphire', code: 'GD001-HSA', hex: '#4f7fa8' } ]
+        });
+    }""")
+    pg.click("#signout")
+    pg.wait_for_timeout(200)
+    pg.fill("#key", "gpl-t5g26 65vkz-hxkxj 76p4p")
+    pg.click("#unlock")
+    pg.wait_for_timeout(600)
+    check("once the shop says, the count is shown", "7 AI upscales left" in pg.inner_text("#ai-msg"))
+    check("and the button is live", not pg.is_disabled("#ai-go"))
+
+    got, msg = use_code("GD001-HSA")
+    check("the shop's own colour book reached the panel", got == "#4f7fa8", )
+    check("and it says what it matched", "Heather Sapphire" in msg)
+
+    pg.evaluate("() => window.__calls.length = 0")
+    pg.select_option("#ai-scale", "2")
+    pg.click("#ai-go")
+    pg.wait_for_timeout(3000)
+
+    sent = pg.evaluate("() => window.__calls.filter(c => c.upscale)[0]")
+    check("the artwork is sent as multipart", bool(sent) and "multipart/form-data" in sent["type"])
+    check("with the key in it", bool(sent) and "GPLT5G2665VKZHXKXJ76P4P" in sent["head"])
+    check("and the scale that was chosen", bool(sent) and 'name="scale"' in sent["head"]
+          and "\r\n\r\n2\r\n" in sent["head"])
+    check("and a real PNG, not an empty part",
+          bool(sent) and "PNG" in sent["head"] and sent["size"] > 1000)
+
+    check("the document is resized before the pixels go in",
+          pg.evaluate("() => window.__calls.filter(c => c.batchPlay === 'imageSize').length") == 1)
+    order = pg.evaluate("""() => window.__calls
+        .map((c, i) => (c.batchPlay === 'imageSize' ? 'resize' : (c.putPixels ? 'write' : '')))
+        .filter(Boolean).join(',')""")
+    check("in that order - the other way round crops the artwork", order == "resize,write")
+    check("the document is now the upscaled size",
+          pg.evaluate("() => [window.__doc.width, window.__doc.height]") == [2, 2])
+    check("the allowance the shop sent back is what is shown",
+          "6 left this month" in pg.inner_text("#ai-msg")
+          and pg.get_attribute("#ai-go", "data-left") == "6")
+    check("and the old preview is thrown away, not left looking current",
+          "press preview" in pg.inner_text("#pv-msg").lower())
+
+    # A refusal must not be counted as a use, and must not touch the document.
+    pg.evaluate("""() => { window.__upscaleReply =
+        { ok: false, reason: 'bpt_ai_none_left', message: 'No AI upscales left this month.' }; }""")
+    pg.evaluate("() => window.__calls.length = 0")
+    pg.click("#ai-go")
+    pg.wait_for_timeout(2500)
+    check("a refusal is shown in the shop's own words",
+          "No AI upscales left" in pg.inner_text("#ai-msg"))
+    check("and nothing is written to the document",
+          pg.evaluate("() => window.__calls.filter(c => c.putPixels || c.batchPlay).length") == 0)
+    # The count itself, not the sentence - the sentence is busy carrying the
+    # refusal, which is the right thing for it to be doing.
+    check("and it is not counted as one used",
+          pg.get_attribute("#ai-go", "data-left") == "6")
+
+    # A resize Photoshop quietly ignored must stop the job, not write the
+    # upscaled pixels into a document that is still the old size.
+    pg.evaluate("""() => {
+        window.__upscaleReply = null;
+        window.__resizeRefuses = true;
+        window.__doc.width = 1200; window.__doc.height = 900;
+    }""")
+    pg.evaluate("() => window.__calls.length = 0")
+    pg.click("#ai-go")
+    pg.wait_for_timeout(2500)
+    check("a resize that did not happen stops the job",
+          "did not resize" in pg.inner_text("#ai-msg"))
+    check("and still nothing is written",
+          pg.evaluate("() => window.__calls.filter(c => c.putPixels).length") == 0)
+    pg.evaluate("() => { window.__resizeRefuses = false; }")
+
     pg.screenshot(path=os.path.join(ROOT, "test", "panel-tool.png"))
     pg.evaluate("() => { window.__doc.mode = 'RGBColor'; }")
     pg.click("#signout")
@@ -424,8 +646,8 @@ with sync_playwright() as p:
 
 httpd.shutdown()
 
-if oks + len(fails) < 26:
-    fails.append("only %d checks ran, expected at least 26" % (oks + len(fails)))
+if oks + len(fails) < 70:
+    fails.append("only %d checks ran, expected at least 70" % (oks + len(fails)))
 
 print("\n" + ("%d FAILED of %d" % (len(fails), oks + len(fails)) if fails else "PANEL: ALL %d PASSED" % oks))
 for f in fails:

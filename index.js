@@ -135,6 +135,25 @@ function say( el, text, kind ) {
 	node.className = 'msg' + ( kind ? ' ' + kind : '' );
 }
 
+/**
+ * The same thing for the small explanatory lines under a control.
+ *
+ * Separate from say() rather than a flag on it, because say() deliberately
+ * resets the class list to exactly 'msg' and the three lines that use this one
+ * have to stay small - a status sentence that grew to body size every time it
+ * changed would shove the controls under it around as you worked.
+ */
+function note( el, text, kind ) {
+	const node = $( el );
+
+	if ( ! node ) {
+		return;
+	}
+
+	node.textContent = text || '';
+	node.className = 'msg small ' + ( kind || 'dim' );
+}
+
 function describeDoc() {
 	const blocked = bridge.blocker();
 
@@ -150,6 +169,12 @@ function describeDoc() {
 	$( 'doc' ).className = 'dim small';
 }
 
+/* What the shop last told us: the garment colour book, and how many AI
+   upscales this key has left. Both arrive on the licence check, which happens
+   at start-up and again on every Apply, so neither can go stale mid-job. */
+let book = [];
+let aiLeft = null;
+
 function enterTool( info ) {
 	show( 'tool' );
 	toScreen();
@@ -157,7 +182,19 @@ function enterTool( info ) {
 
 	if ( info ) {
 		$( 'plan' ).textContent = planLine( info );
+
+		if ( Array.isArray( info.garments ) ) {
+			book = info.garments;
+			buildBook();
+		}
+
+		if ( info.upscales && typeof info.upscales.left === 'number' ) {
+			aiLeft = info.upscales.left;
+		}
 	}
+
+	aiRefresh();
+	screenNote();
 }
 
 /* What the customer is actually on. Written out in full rather than assuming
@@ -233,8 +270,18 @@ $( 'reset' ).addEventListener( 'click', () => {
 	toScreen();
 	markSwatches();
 	markGarments();
+	screenNote();
 	repaint();
 	say( 'status', 'Back to the defaults.' );
+} );
+
+$( 'code-use' ).addEventListener( 'click', useCode );
+
+$( 'code-in' ).addEventListener( 'keydown', ( e ) => {
+	if ( 'Enter' === e.key ) {
+		e.preventDefault();
+		useCode();
+	}
 } );
 
 document.addEventListener( 'change', ( e ) => {
@@ -267,16 +314,29 @@ document.addEventListener( 'change', ( e ) => {
 		return;
 	}
 
+	/* The garment is drawn behind the artwork, so in every mode but one a new
+	   colour only needs the picture drawn again - not the engine run again.
+	   Re-running would take seconds on the main thread to produce identical
+	   pixels. setGarment() is where that "but one" is handled. */
+	if ( 'shirt' === k ) {
+		setGarment( rgb );
+		return;
+	}
+
 	S[ k ] = rgb;
 	el.value = toHex( rgb );
 	markSwatches();
 	markGarments();
+	screenNote();
+} );
 
-	/* The garment is drawn behind the artwork, so a new colour only needs the
-	   picture drawn again - not the engine run again. Re-running would take
-	   seconds on the main thread to produce identical pixels. */
-	if ( 'shirt' === k ) {
-		repaint();
+/* The screening mode and the ink both decide what the note above says, and the
+   mode decides whether the garment is an input to the engine at all. */
+document.addEventListener( 'change', ( e ) => {
+	const k = e.target && e.target.getAttribute && e.target.getAttribute( 'data-k' );
+
+	if ( 'screenSource' === k || 'inkEnabled' === k || 'halftone' === k ) {
+		screenNote();
 	}
 } );
 
@@ -289,6 +349,118 @@ document.addEventListener( 'change', ( e ) => {
 		repaint();
 	}
 } );
+
+/* ------------------------------------------------------------------ */
+/* Which colours the screen is worked out from                         */
+/* ------------------------------------------------------------------ */
+
+/* Does the garment colour reach the engine as things stand? True in exactly
+   one mode, and it changes what a garment change has to do - see below. */
+function garmentIsPrinted() {
+	return 'garment' === S.screenSource && S.halftone;
+}
+
+/**
+ * Say out loud which two colours the dots are being worked out from.
+ *
+ * Without this the mode is guesswork: the garment colour is one section up,
+ * the ink colour may never have been set, and the dots would move for reasons
+ * that are nowhere near where you are looking.
+ */
+function screenNote() {
+	const el = $( 'screen-msg' );
+
+	if ( ! el ) {
+		return;
+	}
+
+	if ( 'garment' !== S.screenSource ) {
+		note( 'screen-msg', '' );
+		return;
+	}
+
+	const ink = S.inkEnabled ? S.ink : studio.autoInk( S.shirt );
+	const close = [ 0, 1, 2 ].every( ( i ) => Math.abs( S.shirt[ i ] - ink[ i ] ) < 12 );
+
+	if ( close ) {
+		note( 'screen-msg',
+			'The ink and the garment are the same colour, so there is no print to screen. Change one of them.',
+			'warn' );
+		return;
+	}
+
+	note( 'screen-msg', 'Dots worked out from the garment ' + toHex( S.shirt ) + ' and the ink ' +
+		toHex( ink ) + ( S.inkEnabled ? '' : ' (assumed - turn "Print in one ink" on to choose)' ) + '.' );
+}
+
+/* ------------------------------------------------------------------ */
+/* Typing a colour in                                                  */
+/* ------------------------------------------------------------------ */
+
+/* The sixteen built-in blanks are offered under their names alongside whatever
+   the shop has loaded, so the box answers for both. */
+function fullBook() {
+	return book.concat( GARMENTS.map( ( g ) => (
+		{ name: g.name, code: '', hex: g.hex }
+	) ) );
+}
+
+function buildBook() {
+	const list = $( 'colour-book' );
+
+	if ( ! list ) {
+		return;
+	}
+
+	list.textContent = '';
+
+	fullBook().forEach( ( e ) => {
+		const o = document.createElement( 'option' );
+
+		o.value = e.code || e.name;
+		list.appendChild( o );
+	} );
+}
+
+function useCode() {
+	const got = studio.parseColour( $( 'code-in' ).value, fullBook() );
+
+	if ( ! got.rgb ) {
+		note( 'code-msg', got.error, 'warn' );
+		return;
+	}
+
+	setGarment( got.rgb );
+	note( 'code-msg', 'Matched ' + got.label + ' - ' + toHex( got.rgb ) + '.' );
+}
+
+/**
+ * One way in for every way of choosing a garment - swatch, hex box, code box.
+ *
+ * The important part is the last branch. In the garment screening mode the
+ * colour is an input to the engine, so the cached preview is now a picture of
+ * a different job. Repainting it under a new backdrop would show a separation
+ * that was never worked out for this garment, which is worse than showing
+ * nothing: it looks finished.
+ */
+function setGarment( rgb ) {
+	S.shirt = rgb;
+	$( 'shirt-hex' ).value = toHex( rgb );
+
+	S.shirtPreview = true;
+	document.querySelector( '[data-k="shirtPreview"]' ).checked = true;
+
+	markGarments();
+	screenNote();
+
+	if ( garmentIsPrinted() ) {
+		lastPreview = null;
+		say( 'pv-msg', 'Garment changed - press Preview again. On this setting the dots are worked out from it.', 'warn' );
+		return;
+	}
+
+	repaint();
+}
 
 /* ------------------------------------------------------------------ */
 /* Ink swatches                                                        */
@@ -334,6 +506,7 @@ function buildSwatches() {
 			S.ink = fromHex( ink.hex );
 			$( 'ink-hex' ).value = ink.hex;
 			markSwatches();
+			screenNote();
 		} );
 
 		wrap.appendChild( b );
@@ -391,18 +564,11 @@ function buildGarments() {
 		b.setAttribute( 'data-g', g.hex );
 		b.style.backgroundColor = g.hex;
 
+		/* setGarment switches the preview on as well. Setting the colour
+		   without it would look like the button did nothing, which is the whole
+		   reason this row is here rather than just the hex box. */
 		b.addEventListener( 'click', () => {
-			S.shirt = fromHex( g.hex );
-			$( 'shirt-hex' ).value = g.hex;
-
-			/* Setting the colour without switching the preview on would look
-			   like the button did nothing, which is the whole reason the row
-			   is here rather than just the hex box. */
-			S.shirtPreview = true;
-			document.querySelector( '[data-k="shirtPreview"]' ).checked = true;
-
-			markGarments();
-			repaint();
+			setGarment( fromHex( g.hex ) );
 		} );
 
 		wrap.appendChild( b );
@@ -563,6 +729,283 @@ $( 'preview' ).addEventListener( 'click', () => {
 } );
 
 /* ------------------------------------------------------------------ */
+/* AI upscale                                                          */
+/* ------------------------------------------------------------------ */
+
+var AI_ENDPOINT = 'https://geordieprintco.co.uk/wp-json/bpt/v1/upscale';
+
+/**
+ * The button's state, and optionally the line under it.
+ *
+ * `quiet` exists because this is called at the end of every attempt, including
+ * failed ones. Writing the allowance line there would wipe the reason it just
+ * failed a fraction of a second after showing it - the customer would see the
+ * button go live again and no explanation at all.
+ *
+ * @param {boolean} quiet Leave the message alone; set the button only.
+ */
+function aiRefresh( quiet ) {
+	const btn = $( 'ai-go' );
+
+	if ( ! btn ) {
+		return;
+	}
+
+	btn.disabled = null === aiLeft || aiLeft < 1 || busy;
+
+	/* The count where it can be read even when the line under the button is
+	   busy saying something else - which is most of the time something has
+	   gone wrong, and is exactly when it matters that this did not move. */
+	btn.setAttribute( 'data-left', null === aiLeft ? '' : String( aiLeft ) );
+
+	if ( quiet ) {
+		return;
+	}
+
+	if ( null === aiLeft ) {
+		/* Not "0 left". The shop has not said, which is a different thing and
+		   must not read as a refusal. */
+		note( 'ai-msg', 'Checking how many you have left…' );
+		return;
+	}
+
+	note( 'ai-msg', aiLeft + ( 1 === aiLeft ? ' AI upscale' : ' AI upscales' ) +
+		' left this month.' + ( aiLeft < 1 ? ' Buy more on your membership page.' : '' ),
+		aiLeft < 1 ? 'warn' : '' );
+}
+
+/**
+ * Pixels to a PNG, and back again.
+ *
+ * The endpoint takes an image file, not a pixel buffer, and hands one back.
+ * A canvas is the only encoder and decoder in a panel, so both directions go
+ * through one - and both check the canvas can actually do it rather than
+ * assuming, because a missing method here would otherwise surface as a
+ * confusing failure three steps later.
+ */
+function pngFromPixels( data, w, h ) {
+	const c = document.createElement( 'canvas' );
+
+	c.width = w;
+	c.height = h;
+
+	const ctx = c.getContext ? c.getContext( '2d' ) : null;
+
+	if ( ! ctx || ! c.toDataURL ) {
+		throw new Error( 'This version of Photoshop cannot encode a PNG in a panel, so the AI upscale cannot run here.' );
+	}
+
+	const img = ctx.createImageData( w, h );
+
+	img.data.set( data );
+	ctx.putImageData( img, 0, 0 );
+
+	return c.toDataURL( 'image/png' );
+}
+
+function pixelsFromDataUrl( url ) {
+	return new Promise( ( resolve, reject ) => {
+		const im = new Image();
+
+		im.onload = () => {
+			const c = document.createElement( 'canvas' );
+
+			c.width = im.naturalWidth || im.width;
+			c.height = im.naturalHeight || im.height;
+
+			const ctx = c.getContext( '2d' );
+
+			ctx.drawImage( im, 0, 0 );
+
+			const d = ctx.getImageData( 0, 0, c.width, c.height );
+
+			resolve( {
+				data: new Uint8ClampedArray( d.data ),
+				width: c.width,
+				height: c.height
+			} );
+		};
+
+		im.onerror = () => reject( new Error( 'The upscaled image came back damaged.' ) );
+		im.src = url;
+	} );
+}
+
+function base64ToBytes( b64 ) {
+	const bin = atob( b64 );
+	const out = new Uint8Array( bin.length );
+
+	for ( let i = 0; i < bin.length; i++ ) {
+		out[ i ] = bin.charCodeAt( i );
+	}
+
+	return out;
+}
+
+/**
+ * A multipart body, built by hand.
+ *
+ * FormData would be shorter, and it is the one part of this I cannot try
+ * against a real UXP host - so it is not used. A byte array and a
+ * Content-Type header are plain fetch, which the licence check already proves
+ * works in this panel.
+ */
+function multipart( fields, file ) {
+	const boundary = '----printlab' + Math.random().toString( 16 ).slice( 2 ) + Date.now().toString( 16 );
+	const enc = new TextEncoder();
+	const parts = [];
+
+	Object.keys( fields ).forEach( ( k ) => {
+		parts.push( enc.encode(
+			'--' + boundary + '\r\nContent-Disposition: form-data; name="' + k + '"\r\n\r\n' +
+			fields[ k ] + '\r\n'
+		) );
+	} );
+
+	parts.push( enc.encode(
+		'--' + boundary + '\r\nContent-Disposition: form-data; name="' + file.name +
+		'"; filename="' + file.filename + '"\r\nContent-Type: image/png\r\n\r\n'
+	) );
+	parts.push( file.bytes );
+	parts.push( enc.encode( '\r\n--' + boundary + '--\r\n' ) );
+
+	let total = 0;
+	parts.forEach( ( p ) => { total += p.length; } );
+
+	const body = new Uint8Array( total );
+	let at = 0;
+
+	parts.forEach( ( p ) => {
+		body.set( p, at );
+		at += p.length;
+	} );
+
+	return { body: body, type: 'multipart/form-data; boundary=' + boundary };
+}
+
+function aiUpscale() {
+	if ( busy ) {
+		return;
+	}
+
+	const blocked = bridge.blocker();
+
+	if ( blocked ) {
+		note( 'ai-msg', blocked, 'warn' );
+		return;
+	}
+
+	const scale = Number( $( 'ai-scale' ).value ) || 4;
+
+	busy = true;
+	$( 'ai-go' ).disabled = true;
+	note( 'ai-msg', 'Reading the layer…' );
+
+	let key = '';
+	let frame = null;
+
+	licence.storedKey( store )
+		.then( ( k ) => {
+			if ( ! k ) {
+				throw new Error( 'Sign in with your key first.' );
+			}
+
+			key = k;
+
+			return bridge.read( 0 );
+		} )
+		.then( ( f ) => {
+			frame = f;
+
+			/* The server refuses anything that would come out over 16
+			   megapixels, and it is a better refusal than mine because it
+			   knows the real limit. But it refuses AFTER the upload, and an
+			   upload of a very large layer takes a while to be told no - so
+			   the arithmetic is done here too. */
+			if ( f.width * f.height * scale * scale > 16000000 ) {
+				throw new Error(
+					'At ' + scale + 'x this would come out over 16 megapixels, which is bigger than ' +
+					'the upscaler will produce. The layer is already ' +
+					( Math.round( f.width * f.height / 100000 ) / 10 ) + ' megapixels. Try a smaller scale.'
+				);
+			}
+
+			note( 'ai-msg', 'Sending it up…' );
+
+			const url = pngFromPixels( f.data, f.width, f.height );
+			const bytes = base64ToBytes( url.slice( url.indexOf( ',' ) + 1 ) );
+			const part = multipart(
+				{ key: key, scale: String( scale ) },
+				{ name: 'image', filename: 'layer.png', bytes: bytes }
+			);
+
+			note( 'ai-msg', 'Redrawing the detail. This takes a few seconds…' );
+
+			return fetch( AI_ENDPOINT, {
+				method: 'POST',
+				headers: { 'Content-Type': part.type },
+				body: part.body
+			} );
+		} )
+		.then( ( res ) => res.json() )
+		.then( ( body ) => {
+			if ( ! body || ! body.ok ) {
+				/*
+				 * The allowance is only spent on a job that ran, so a refusal
+				 * must not be reported as one less. The shop sends the real
+				 * number back on the success path; here it is left alone.
+				 */
+				throw new Error( ( body && body.message ) || 'The upscaler could not be reached.' );
+			}
+
+			if ( typeof body.left === 'number' ) {
+				aiLeft = body.left;
+			}
+
+			note( 'ai-msg', 'Writing it back…' );
+
+			return pixelsFromDataUrl( body.image );
+		} )
+		.then( ( out ) => {
+			/* Resize FIRST. Writing bigger pixels into a document that is
+			   still the old size would put the artwork in as a crop of its own
+			   top left corner. */
+			return bridge.resizeDocument( frame.info.documentID, out.width, out.height )
+				.then( ( info ) => bridge.write( {
+					data: out.data,
+					width: out.width,
+					height: out.height,
+					info: info
+				}, 'Print Lab: AI upscale' ) )
+				.then( () => out );
+		} )
+		.then( ( out ) => {
+			note( 'ai-msg', 'Done - now ' + out.width + ' x ' + out.height + '. ' +
+				aiLeft + ' left this month.', 'ok' );
+			describeDoc();
+
+			/* The old preview was of the old pixels at the old size. */
+			lastPreview = null;
+			say( 'pv-msg', 'Press Preview to see the upscaled layer.' );
+		} )
+		.catch( ( e ) => {
+			note( 'ai-msg', ( e && e.message ) || 'The AI upscale did not run.', 'warn' );
+		} )
+		.then( () => {
+			busy = false;
+
+			/* Quiet: whatever the attempt ended up saying - "Done, 6 left" or
+			   the reason it stopped - is the thing worth reading, and it is
+			   already on screen. */
+			aiRefresh( true );
+		} );
+}
+
+if ( $( 'ai-go' ) ) {
+	$( 'ai-go' ).addEventListener( 'click', aiUpscale );
+}
+
+/* ------------------------------------------------------------------ */
 /* Apply                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -624,5 +1067,7 @@ try {
 
 buildSwatches();
 buildGarments();
+buildBook();
 toScreen();
+screenNote();
 start();

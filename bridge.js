@@ -16,6 +16,7 @@ function Bridge( ps ) {
 	this.app = ps.app;
 	this.core = ps.core;
 	this.imaging = ps.imaging;
+	this.action = ps.action || null;
 	this.constants = ps.constants || {};
 }
 
@@ -213,6 +214,87 @@ Bridge.prototype.write = function ( frame, commandName ) {
 			} );
 		} );
 	}, { commandName: commandName || 'Geordie Print Lab' } );
+};
+
+/**
+ * Make the whole document bigger, in one history step.
+ *
+ * Only the AI upscale needs this, and it needs it because there is nowhere
+ * else for the extra pixels to go: an upscaled layer written back into a
+ * document that is still the old size is a picture cropped to its top left
+ * corner. Photoshop resizes the document, then the new pixels replace the
+ * layer at the size the document now is.
+ *
+ * The interpolation choice does not matter to the result - every pixel that
+ * lands here is overwritten a moment later by the upscaled ones - but
+ * 'automaticInterpolation' is chosen anyway so that anything ELSE in the
+ * document, a second layer the customer has, is resampled sensibly rather
+ * than by nearest neighbour.
+ *
+ * @param {number} documentID Document.
+ * @param {number} width      New width in pixels.
+ * @param {number} height     New height in pixels.
+ * @return {Promise}
+ */
+Bridge.prototype.resizeDocument = function ( documentID, width, height ) {
+	var self = this;
+	var action = this.action;
+
+	if ( ! action || ! action.batchPlay ) {
+		return Promise.reject( new Error(
+			'This version of Photoshop cannot be asked to resize a document from a plugin.'
+		) );
+	}
+
+	return this.core.executeAsModal( function ( ctx ) {
+		var hostControl = ctx && ctx.hostControl;
+		var suspend = hostControl && hostControl.suspendHistory
+			? hostControl.suspendHistory( { documentID: documentID, name: 'Print Lab: AI upscale' } )
+			: Promise.resolve( null );
+
+		return Promise.resolve( suspend ).then( function ( token ) {
+			return action.batchPlay( [ {
+				_obj: 'imageSize',
+				width: { _unit: 'pixelsUnit', _value: width },
+				height: { _unit: 'pixelsUnit', _value: height },
+				scaleStyles: true,
+				constrainProportions: false,
+				interfaceIconFrameDimmed: {
+					_enum: 'interpolationType',
+					_value: 'automaticInterpolation'
+				},
+				_options: { dialogOptions: 'dontDisplay' }
+			} ], {} ).then( function () {
+				if ( token !== null && hostControl && hostControl.resumeHistory ) {
+					return hostControl.resumeHistory( token );
+				}
+
+				return undefined;
+			}, function ( err ) {
+				if ( token !== null && hostControl && hostControl.resumeHistory ) {
+					return Promise.resolve( hostControl.resumeHistory( token ) ).then( function () {
+						throw err;
+					} );
+				}
+
+				throw err;
+			} );
+		} );
+	}, { commandName: 'Print Lab: resize document' } ).then( function () {
+		/* Read the size back rather than assuming it took. A batchPlay that
+		   was refused resolves like one that worked, and the difference would
+		   only show up as a cropped picture. */
+		var now = self.docInfo();
+
+		if ( Math.abs( now.width - width ) > 1 || Math.abs( now.height - height ) > 1 ) {
+			throw new Error(
+				'Photoshop did not resize the document, so the upscale has been stopped ' +
+				'rather than written in at the wrong size.'
+			);
+		}
+
+		return now;
+	} );
 };
 
 module.exports = { Bridge: Bridge, COMPONENTS: COMPONENTS };
