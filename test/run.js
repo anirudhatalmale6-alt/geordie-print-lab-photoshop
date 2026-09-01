@@ -516,6 +516,29 @@ check( 'and for an expired one',
 check( 'neither leaks the reason code',
 	[ 'key_revoked', 'key_expired' ].every( ( r ) => licence.explain( r ).indexOf( '_' ) === -1 ) );
 
+/* The shop now blocks an account that is used by two people at once, and the
+   plugin is the second place they find out. A reason code the panel cannot
+   explain falls through to "the key could not be checked", which tells a
+   customer nothing and tells the shop nothing when they ring up. */
+check( 'a blocked account is explained',
+	licence.explain( 'account_blocked' ).toLowerCase().indexOf( 'blocked' ) !== -1 );
+check( 'and it tells them what to do about it',
+	licence.explain( 'account_blocked' ).toLowerCase().indexOf( 'get in touch' ) !== -1 );
+check( 'and does not leak the code',
+	licence.explain( 'account_blocked' ).indexOf( '_' ) === -1 );
+
+/* The machine allowance is one per user and a membership can have more than
+   one user, so the panel must not name a number. It said "two computers",
+   which was already wrong for anybody who had paid for a second seat - and
+   the shop's own page is the only thing that knows the figure. */
+/* Anchored on the noun. A bare word-list flagged "the one you want to use",
+   where "one" is a pronoun - the assertion has to say what it means, which is
+   that no COUNT is put in front of the word computer. */
+check( 'the machine message quotes no count of computers',
+	! /\b(one|two|three|four|\d+)\s+computers?\b/i.test( licence.explain( 'too_many_installs' ) ) );
+check( 'and points at the page that does know',
+	licence.explain( 'too_many_installs' ).indexOf( 'membership page' ) !== -1 );
+
 section( 'settings are bounded' );
 
 const wild = studio.clampSettings( Object.assign( studio.defaults(), {
@@ -982,8 +1005,8 @@ Promise.all( run ).then( () => {
 
 	/* A floor. A test file that stops running looks exactly like one that
 	   passes, and this one is full of async blocks that could silently vanish. */
-	if ( total < 181 ) {
-		fails.push( 'only ' + total + ' checks ran, expected at least 181' );
+	if ( total < 186 ) {
+		fails.push( 'only ' + total + ' checks ran, expected at least 186' );
 	}
 
 	console.log( '\n' + ( fails.length ? fails.length + ' FAILED of ' + total : 'ALL ' + ok + ' PASSED' ) );

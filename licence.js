@@ -227,7 +227,12 @@ function explain( reason ) {
 	var map = {
 		unknown_key: 'That key was not recognised. Check it against the one on your membership page.',
 		membership_inactive: 'Your membership is not active at the moment, so the plugin is switched off. It will come back on by itself once a payment goes through.',
-		too_many_installs: 'This key is already in use on two computers. Sign out of one on your membership page, then try again.',
+		/* Deliberately does not name a number. The allowance is one machine per
+		   user and a membership can have more than one user, so a fixed "two"
+		   here was already wrong for anybody who had paid for a second seat -
+		   and it is the shop's page, not the plugin, that knows the figure. */
+		too_many_installs: 'This key is already registered on as many computers as your membership allows. Sign out of all computers on your membership page, then set up the one you want to use.',
+		account_blocked: 'This account has been blocked. The membership is for one person and it was found signed in and working in two places at once. Get in touch with Geordie Print Co if you think that is wrong.',
 		key_revoked: 'That key has been switched off by Geordie Print Co. Get in touch with them if that is not what you expected.',
 		key_expired: 'That key has run out. Get in touch with Geordie Print Co if you need it extending.',
 		too_many_attempts: 'Too many tries in a short space of time. Give it a quarter of an hour and try again.',
