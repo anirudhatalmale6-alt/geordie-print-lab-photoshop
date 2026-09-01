@@ -558,10 +558,10 @@ const noShirt = studio.settingsForEngine( studio.clampSettings( studio.defaults(
 check( 'so the engine is handed the same job with a garment set or not',
 	JSON.stringify( withShirt ) === JSON.stringify( noShirt ) );
 
-/* The check above passes on the DEFAULT screening mode, which is the mode
-   where the claim is easy. Every other mode has to be walked too, or a
-   regression that leaked the garment into, say, the opacity screen would sit
-   there green. */
+/* The check above passes because the screen is OFF by default, which is the
+   case where the claim is easy - two of the five modes do read the garment
+   once it is on. Every mode has to be walked, or a regression that leaked the
+   garment into, say, the opacity screen would sit there green. */
 [ 'dark', 'white', 'opacity' ].forEach( ( mode ) => {
 	const a = studio.settingsForEngine( studio.clampSettings( Object.assign(
 		studio.defaults(), { halftone: true, screenSource: mode, shirt: [ 27, 42, 68 ] }
@@ -574,8 +574,8 @@ check( 'so the engine is handed the same job with a garment set or not',
 		JSON.stringify( a ) === JSON.stringify( b ) );
 } );
 
-/* And the one mode where it MUST change something. A promise only kept
-   because the feature is broken is not a promise kept. */
+/* And the modes where it MUST change something. A promise only kept because
+   the feature is broken is not a promise kept. */
 function garmentJob( shirt, extra ) {
 	return studio.settingsForEngine( studio.clampSettings( Object.assign(
 		studio.defaults(),
@@ -606,6 +606,104 @@ check( 'with the screen switched off the garment is not sent at all',
 	studio.settingsForEngine( studio.clampSettings( Object.assign(
 		studio.defaults(), { halftone: false, screenSource: 'garment', shirt: [ 27, 42, 68 ] }
 	) ) ).screenGarment === null );
+
+section( 'the full colour screen' );
+
+/* Why this mode exists: every other one is a ONE INK answer, and a one ink
+   answer flattens a colour design. Measured on his neon print on black, the
+   green came back at 33% dots and the white next to it at 96%. On the shirt
+   that reads as the green having been taken away. */
+
+function colourJob( shirt, extra ) {
+	return studio.settingsForEngine( studio.clampSettings( Object.assign(
+		studio.defaults(),
+		{ halftone: true, screenSource: 'colour', shirt: shirt },
+		extra || {}
+	) ) );
+}
+
+check( 'full colour is the default screening mode',
+	studio.defaults().screenSource === 'colour' );
+check( 'and the engine has a branch of that name',
+	fs.readFileSync( path.join( ROOT, 'engine.js' ), 'utf8' ).indexOf( "mode === 'colour'" ) !== -1 );
+check( 'on the full colour setting the garment reaches the engine',
+	JSON.stringify( colourJob( [ 27, 42, 68 ] ).screenGarment ) === '[27,42,68]' );
+check( 'and two garments are two different jobs',
+	JSON.stringify( colourJob( [ 27, 42, 68 ] ) ) !== JSON.stringify( colourJob( [ 255, 255, 255 ] ) ) );
+
+/* No single ink to aim at - each pixel's ink is that pixel - so it is handed
+   no ink at all rather than one it would silently ignore. A stored ink here
+   would be a value the engine never reads, which is the shape of bug that
+   makes a control look like it does something. */
+check( 'no ink is sent, even when one has been chosen',
+	colourJob( [ 27, 42, 68 ], { inkEnabled: true, ink: [ 255, 210, 0 ] } ).screenInk === null );
+/* The ink is still SENT, because "Print in one ink" repaints the finished
+   dots at the last step whatever mode worked out where they fall. What this
+   mode ignores is the ink as an input to that working out, which is the check
+   above. The two are easy to conflate and the panel copy said the wrong one
+   until this test disagreed with it. */
+check( 'but the ink still reaches the last step, which repaints the dots',
+	JSON.stringify( colourJob( [ 27, 42, 68 ], { inkEnabled: true, ink: [ 255, 210, 0 ] } ).ink ) ===
+	'[255,210,0]' );
+
+check( 'with the screen off the garment is not sent on this mode either',
+	colourJob( [ 27, 42, 68 ], { halftone: false } ).screenGarment === null );
+
+/* Through the engine, on his own palette. A solid colour must survive as that
+   colour, judged by what the screened cell averages to ON THE GARMENT - the
+   dot count alone calls a legitimately-94% colour a failure. */
+function screened( rgb, shirt, mode ) {
+	const s = studio.settingsForEngine( studio.clampSettings( Object.assign(
+		studio.defaults(),
+		{ halftone: true, screenSource: mode || 'colour', shirt: shirt,
+		  lpi: 30, dpi: 300, microDot: 0, cleanupIntensity: 0 }
+	) ) );
+	const W = 120, H = 120;
+	const d = new Uint8ClampedArray( W * H * 4 );
+
+	for ( let i = 0; i < W * H; i++ ) {
+		d[ i * 4 ] = rgb[ 0 ]; d[ i * 4 + 1 ] = rgb[ 1 ];
+		d[ i * 4 + 2 ] = rgb[ 2 ]; d[ i * 4 + 3 ] = 255;
+	}
+
+	engine.run( d, W, H, s, 1 );
+
+	let n = 0;
+	const sum = [ 0, 0, 0 ];
+	for ( let i = 0; i < W * H; i++ ) {
+		if ( d[ i * 4 + 3 ] > 0 ) {
+			n++;
+			sum[ 0 ] += d[ i * 4 ]; sum[ 1 ] += d[ i * 4 + 1 ]; sum[ 2 ] += d[ i * 4 + 2 ];
+		}
+	}
+
+	const seen = [ 0, 1, 2 ].map( ( k ) => ( sum[ k ] + shirt[ k ] * ( W * H - n ) ) / ( W * H ) );
+	return {
+		pct: 100 * n / ( W * H ),
+		err: Math.max( ...[ 0, 1, 2 ].map( ( k ) => Math.abs( seen[ k ] - rgb[ k ] ) ) )
+	};
+}
+
+const NEON = [ 124, 252, 0 ];
+const TEE = [ 0, 0, 0 ];
+
+check( 'his neon green prints as neon green on black',
+	screened( NEON, TEE ).err < 4, screened( NEON, TEE ).err );
+check( 'and gets as much ink as the white beside it',
+	Math.abs( screened( NEON, TEE ).pct - screened( [ 255, 255, 255 ], TEE ).pct ) < 3 );
+check( 'which the one-ink mode did not - that is the reported fault',
+	screened( [ 255, 255, 255 ], TEE, 'garment' ).pct -
+	screened( NEON, TEE, 'garment' ).pct > 35 );
+check( 'a shade fading towards the garment still gets dots',
+	Math.abs( screened( [ 62, 126, 0 ], TEE ).pct - 50 ) < 6 );
+check( 'and that shade averages back to the shade it was',
+	screened( [ 62, 126, 0 ], TEE ).err < 4 );
+check( 'the garment colour itself lays no ink',
+	screened( TEE, TEE ).pct === 0 );
+check( 'and neither does sport grey on sport grey',
+	screened( [ 170, 170, 170 ], [ 170, 170, 170 ] ).pct === 0 );
+check( 'neon green is still neon green on sport grey',
+	screened( NEON, [ 170, 170, 170 ] ).err < 4 );
 
 section( 'typing a colour in' );
 
@@ -884,8 +982,8 @@ Promise.all( run ).then( () => {
 
 	/* A floor. A test file that stops running looks exactly like one that
 	   passes, and this one is full of async blocks that could silently vanish. */
-	if ( total < 166 ) {
-		fails.push( 'only ' + total + ' checks ran, expected at least 166' );
+	if ( total < 181 ) {
+		fails.push( 'only ' + total + ' checks ran, expected at least 181' );
 	}
 
 	console.log( '\n' + ( fails.length ? fails.length + ' FAILED of ' + total : 'ALL ' + ok + ' PASSED' ) );

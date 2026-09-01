@@ -341,6 +341,20 @@ with sync_playwright() as p:
 
     NAVY, ROYAL = (0x1b, 0x2a, 0x44), (0x1d, 0x4f, 0x91)
 
+    # Two different behaviours here and the mode decides which. On a mode that
+    # does NOT read the garment, a new colour only needs the picture drawn
+    # again. On one that does, the cached preview is a picture of a different
+    # job and repainting it under a new backdrop would show a separation that
+    # was never worked out for this garment - which is worse than showing
+    # nothing, because it looks finished.
+    #
+    # The screen is on from the halftone section above, so this half has to say
+    # out loud which mode it is in rather than inherit the default.
+    pg.select_option('[data-k="screenSource"]', "dark")
+    pg.wait_for_timeout(200)
+    check("on a mode that does not read the garment, it is preview only",
+          pg.input_value('[data-k="screenSource"]') == "dark")
+
     check("there is a row of garment colours (%d)" %
           pg.evaluate("() => document.querySelectorAll('#garments button').length"),
           pg.evaluate("() => document.querySelectorAll('#garments button').length") == 16)
@@ -371,6 +385,50 @@ with sync_playwright() as p:
     # The claim printed under the control.
     check("changing the garment never writes to the document",
           pg.evaluate("() => window.__calls.filter(c => c.putPixels).length") == 0)
+
+    # --- and the other half: a mode that DOES read the garment ----------
+    #
+    # Asserted on the canvas and on the message, not on a flag. A stale
+    # separation repainted under a new shirt is the failure this prevents, and
+    # it is invisible unless you look at what is actually on screen.
+    pg.select_option('[data-k="screenSource"]', "colour")
+    pg.wait_for_timeout(200)
+    pg.evaluate("() => window.__calls.length = 0")
+    pg.click('#garments button[data-g="#1b2a44"]')
+    pg.wait_for_timeout(400)
+    check("on the full colour mode a new garment does NOT repaint the old dots "
+          "(%d royal left)" % count(ROYAL), count(ROYAL) == 0)
+    # And the old picture is off the screen, not merely uncached. Leaving it up
+    # would show the OLD garment under the OLD dots while the swatch row said
+    # something else - the same "looks finished when it is not" failure, one
+    # step further along. What should be left is the new garment and nothing
+    # else, so the test is that the canvas is ONE flat colour - counting navy
+    # alone would pass on a canvas that still had dots all over it.
+    shades = pg.evaluate("""() => {
+        const cv = document.getElementById('pv');
+        const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+        const seen = new Set();
+        for (let i = 0; i < d.length; i += 4) {
+            seen.add(d[i] + ',' + d[i+1] + ',' + d[i+2]);
+        }
+        return [...seen];
+    }""")
+    check("  and the stale artwork is wiped, leaving just the new garment (%s)"
+          % ("; ".join(shades[:3]) if shades else "empty"),
+          shades == ["27,42,68"])
+    check("  and it says why, instead of leaving a stale picture up",
+          "Preview again" in pg.inner_text("#pv-msg"))
+    check("  and it did not silently re-run the engine either",
+          pg.evaluate("() => window.__calls.length") == 0)
+
+    # Put it back, so the checks that follow see the state they were written
+    # for rather than whatever this block left behind.
+    pg.select_option('[data-k="screenSource"]', "dark")
+    pg.wait_for_timeout(200)
+    pg.click('#garments button[data-g="#1d4f91"]')
+    pg.wait_for_timeout(400)
+    check("back on a preview-only mode the garment paints again (%d royal)"
+          % count(ROYAL), count(ROYAL) > 500)
 
     pg.uncheck('[data-k="shirtPreview"]')
     pg.wait_for_timeout(400)
@@ -486,7 +544,9 @@ with sync_playwright() as p:
     ]
     check("every Screen from option is one the engine reads"
           + (" (%s)" % unread if unread else ""), not unread)
-    check("all four screening modes are offered", len(src_opts) == 4)
+    check("all five screening modes are offered", len(src_opts) == 5)
+    check("full colour is offered, and first - it is what a colour transfer wants",
+          src_opts[0] == "colour")
 
     for key in ["brightness", "contrast", "lightRed", "lightYellow",
                 "lightGreen", "lightCyan", "lightBlue", "lightMagenta"]:
@@ -714,8 +774,8 @@ with sync_playwright() as p:
 
 httpd.shutdown()
 
-if oks + len(fails) < 93:
-    fails.append("only %d checks ran, expected at least 93" % (oks + len(fails)))
+if oks + len(fails) < 100:
+    fails.append("only %d checks ran, expected at least 100" % (oks + len(fails)))
 
 print("\n" + ("%d FAILED of %d" % (len(fails), oks + len(fails)) if fails else "PANEL: ALL %d PASSED" % oks))
 for f in fails:

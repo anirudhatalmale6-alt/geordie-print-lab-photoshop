@@ -814,24 +814,107 @@
 		return levels;
 	}
 
+	/*
+	 * The most a faded pixel's colour is allowed to be pushed back up.
+	 *
+	 * Below about 8% coverage the dots carry almost no ink, and the pixels down
+	 * there are the ones most likely to be JPEG mush rather than artwork - a
+	 * two-of-255 wobble in a black area has a hue, and it is whichever way the
+	 * compressor rounded. Amplifying that by 128 turns a shadow into orange
+	 * confetti. Past this point the colour stops being pushed while the
+	 * coverage keeps falling, so those tones print slightly weaker than asked
+	 * instead of slightly wrong, which is the safe direction to be out in.
+	 */
+	var BOOST_MAX = 12;
+
+	/**
+	 * How far short of full strength a pixel is, when the ink is its OWN colour.
+	 *
+	 * Every other mode assumes the job goes down in one ink and asks how much of
+	 * that one ink each pixel wants. A full colour transfer does not work like
+	 * that: the ink under a neon green pixel is neon green, and a solid slab of
+	 * it wants a solid slab of ink, not 33% of a white one.
+	 *
+	 * So ask a different question. Walk out from the garment colour G through
+	 * the pixel P and keep going until a channel runs off the end of the scale.
+	 * Where that happens is F, the strongest version of this pixel's own colour
+	 * that can be printed, and the multiple t it took to get there says how far
+	 * short of it P was. Returns t:
+	 *
+	 *   P is already as strong as that colour gets  -> t = 1
+	 *   P is halfway from the garment to it         -> t = 2
+	 *   P is the garment colour                     -> 0, meaning print nothing
+	 *
+	 * The caller lays 1/t of the cell in ink of colour F, and the two are the
+	 * same statement: (1/t)*F + (1 - 1/t)*G is exactly P. That is the whole of
+	 * why the dots have to be recoloured as well as counted - laying 1/t of the
+	 * cell in P itself would average out to a colour pulled that much further
+	 * back towards the garment, which is the same washed-out result by another
+	 * route.
+	 *
+	 * It reduces exactly to the two old modes where those were right - a grey
+	 * pixel on a white garment comes back at 1 - luminance, the same number
+	 * `dark` gives - and it keeps being right where they were not. Neon green
+	 * on black, on sport grey and on bottle green all print as neon green,
+	 * because on all three that is what it is.
+	 *
+	 * Note what still gets dots: anything the artist faded towards the garment.
+	 * Glows, drop shadows, gradients, antialiased edges and dot fields that
+	 * were already in the file. That is the whole of what a screen is for on a
+	 * colour job, and it is the part the old modes buried under a flat 30%.
+	 */
+	function fullStrength( r, g, b, gr, gg, gb ) {
+		var t = Infinity, d, lim;
+
+		d = r - gr;
+		if ( d > 0 ) { lim = ( 255 - gr ) / d; if ( lim < t ) { t = lim; } }
+		else if ( d < 0 ) { lim = gr / -d; if ( lim < t ) { t = lim; } }
+
+		d = g - gg;
+		if ( d > 0 ) { lim = ( 255 - gg ) / d; if ( lim < t ) { t = lim; } }
+		else if ( d < 0 ) { lim = gg / -d; if ( lim < t ) { t = lim; } }
+
+		d = b - gb;
+		if ( d > 0 ) { lim = ( 255 - gb ) / d; if ( lim < t ) { t = lim; } }
+		else if ( d < 0 ) { lim = gb / -d; if ( lim < t ) { t = lim; } }
+
+		/* No channel moved: the pixel is the garment colour and there is
+		   nothing to lay down. */
+		if ( t === Infinity ) {
+			return 0;
+		}
+
+		/* t cannot honestly be below 1 - the pixel is inside the scale, so the
+		   walk cannot have overshot before reaching it - but clamp rather than
+		   trust the arithmetic at the very ends of the range. */
+		return t < 1 ? 1 : t;
+	}
+
 	/**
 	 * Screen the artwork into solid dots.
 	 *
 	 * The output is binary by definition: film cannot print a half-opaque
 	 * pixel, so every pixel ends up either fully there or gone, and the
-	 * illusion of a midtone comes from how many of them survive. Colour is
-	 * never touched - only coverage is screened.
+	 * illusion of a midtone comes from how many of them survive.
+	 *
+	 * In four of the five modes colour is never touched - only coverage is
+	 * screened, and the ink colour is step 6's business. `colour` is the
+	 * exception and has to be: there the ink IS the pixel, so a pixel that gets
+	 * fewer dots has to get stronger ones to average back to what it was.
 	 *
 	 * What counts as "coverage" is the whole question, and it is not the same
 	 * job every time:
 	 *
+	 *   colour  - a full colour transfer, where each pixel's ink is its own
+	 *             colour. Solid colours stay solid; dots appear only where the
+	 *             artwork fades towards the garment. See ownCoverage().
 	 *   opacity - screen what the artwork already says is soft. Right for a
 	 *             glow or a feathered edge that has real alpha in it.
 	 *   dark    - screen ink density for dark ink on a light garment. A white
 	 *             pixel needs no ink, a black one needs all of it.
 	 *   white   - the same idea inverted, for white ink on a dark garment.
-	 *   garment - work it out from the two colours that actually decide it: the
-	 *             garment being printed on and the ink going down. See below.
+	 *   garment - one ink, worked out from the two colours that actually decide
+	 *             it: the garment being printed on and the ink going down.
 	 *
 	 * Alpha is always multiplied in on top, so a transparent pixel stays
 	 * transparent whichever mode you pick.
@@ -853,6 +936,15 @@
 	 * that line - a colour this one ink cannot reproduce at all - resolves to
 	 * the nearest amount of ink that this ink can actually make, instead of
 	 * being read as a large amount of it.
+	 *
+	 * WHY `colour` EXISTS AS WELL
+	 *
+	 * `garment` is still a ONE INK answer, and every one ink answer flattens a
+	 * colour design. Measured on a four colour neon print on black: the green
+	 * came back at 33% dots and the white next to it at 96%, because white is
+	 * further along the black-to-white line than green is. On the shirt that
+	 * reads as the green having been taken away. `colour` gives both of them
+	 * 99%, which is what they are.
 	 */
 	function halftone( data, w, h, opts ) {
 		var cell = opts.cell;
@@ -864,12 +956,24 @@
 		var sin = Math.sin( rad );
 		var invCell = 1 / cell;
 		var gr = 0, gg = 0, gb = 0, dr = 0, dg = 0, db = 0, invLen = 0;
-		var x, y, i, a, lum, base, cov, u, v, cu, cv, c;
+		var x, y, i, a, lum, base, cov, u, v, cu, cv, c, t, boost;
 
 		if ( cell < 1.2 ) {
 			// Below about a pixel and a bit per cell there is no dot to draw -
 			// screening here would just add noise, so leave it alone.
 			return;
+		}
+
+		/* Both of the garment-aware modes need the garment colour; only the one
+		   ink one needs an ink to aim at. */
+		if ( mode === 'colour' ) {
+			if ( ! opts.garment ) {
+				mode = 'dark';
+			} else {
+				gr = opts.garment[ 0 ];
+				gg = opts.garment[ 1 ];
+				gb = opts.garment[ 2 ];
+			}
 		}
 
 		if ( mode === 'garment' ) {
@@ -901,8 +1005,14 @@
 					continue;
 				}
 
+				boost = 0;
+
 				if ( mode === 'opacity' ) {
 					base = 1;
+				} else if ( mode === 'colour' ) {
+					t = fullStrength( data[ i ], data[ i + 1 ], data[ i + 2 ], gr, gg, gb );
+					base = t > 0 ? 1 / t : 0;
+					boost = t > BOOST_MAX ? BOOST_MAX : t;
 				} else if ( mode === 'garment' ) {
 					base = clamp01( (
 						( data[ i ] - gr ) * dr +
@@ -936,6 +1046,18 @@
 				c = ( cov * 255 ) | 0;
 
 				data[ i + 3 ] = spot( u, v ) < levels[ c ] ? 255 : 0;
+
+				/* A dot that survives in the full colour mode carries the
+				   strongest version of this pixel's colour, not the faded one
+				   it arrived as - see fullStrength(). Only here: the cov >= 1
+				   pixels above are already at full strength by definition
+				   (boost is 1 for them), and the cov <= 0 ones have no ink to
+				   colour. */
+				if ( boost > 1 && data[ i + 3 ] ) {
+					data[ i ] = clamp255( Math.round( gr + ( data[ i ] - gr ) * boost ) );
+					data[ i + 1 ] = clamp255( Math.round( gg + ( data[ i + 1 ] - gg ) * boost ) );
+					data[ i + 2 ] = clamp255( Math.round( gb + ( data[ i + 2 ] - gb ) * boost ) );
+				}
 			}
 		}
 	}
@@ -1206,6 +1328,13 @@
 			   back is the only option that reopens that project as it was
 			   rather than as a black rectangle. */
 			if ( 'garment' === source && ! ( s.screenGarment && s.screenInk ) ) {
+				source = 'dark';
+			}
+
+			/* The full colour mode needs the garment and nothing else - the ink
+			   under each pixel is that pixel. Same reasoning as above for a
+			   project that names the mode but carries no colour. */
+			if ( 'colour' === source && ! s.screenGarment ) {
 				source = 'dark';
 			}
 

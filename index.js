@@ -418,9 +418,12 @@ document.addEventListener( 'change', ( e ) => {
 /* ------------------------------------------------------------------ */
 
 /* Does the garment colour reach the engine as things stand? True in exactly
-   one mode, and it changes what a garment change has to do - see below. */
+   two modes, and it changes what a garment change has to do - see below. The
+   list lives in studio.js so this and screenColours() cannot drift apart: if
+   this said no while the engine was reading it, changing the shirt would leave
+   stale dots on screen that were worked out for the old one. */
 function garmentIsPrinted() {
-	return 'garment' === S.screenSource && S.halftone;
+	return !! studio.SCREEN_READS_GARMENT[ S.screenSource ] && S.halftone;
 }
 
 /**
@@ -437,8 +440,15 @@ function screenNote() {
 		return;
 	}
 
-	if ( 'garment' !== S.screenSource ) {
+	if ( ! studio.SCREEN_READS_GARMENT[ S.screenSource ] ) {
 		note( 'screen-msg', '' );
+		return;
+	}
+
+	if ( 'colour' === S.screenSource ) {
+		note( 'screen-msg', 'Every colour in the artwork is its own ink, going down on ' +
+			toHex( S.shirt ) + '. A colour at full strength prints solid; dots appear where the ' +
+			'artwork fades towards the garment.' );
 		return;
 	}
 
@@ -517,7 +527,7 @@ function setGarment( rgb ) {
 	screenNote();
 
 	if ( garmentIsPrinted() ) {
-		lastPreview = null;
+		dropPreview();
 		say( 'pv-msg', 'Garment changed - press Preview again. On this setting the dots are worked out from it.', 'warn' );
 		return;
 	}
@@ -710,6 +720,22 @@ function garmentNote() {
 	note.classList.toggle( 'hidden', hide );
 }
 
+/**
+ * Throw the cached preview away AND take it off the screen.
+ *
+ * Nulling `lastPreview` on its own stops it being repainted, but it leaves
+ * whatever was last drawn sitting in the canvas - so after changing the shirt
+ * on a mode that screens against it, the panel showed the OLD garment under
+ * the OLD dots while the swatch row said something else. That is the same
+ * "looks finished when it is not" failure the null was added to prevent, just
+ * one step further along. Wipe the canvas back to the empty backdrop so the
+ * message beside it is the only thing claiming anything.
+ */
+function dropPreview() {
+	lastPreview = null;
+	repaint();
+}
+
 /* Draw the last preview again with whatever the garment is now. Cheap on
    purpose: no engine, no document read. */
 function repaint() {
@@ -717,6 +743,18 @@ function repaint() {
 
 	if ( lastPreview ) {
 		paintPreview( lastPreview );
+		return;
+	}
+
+	/* Nothing to draw on top, but the garment still has to be drawn. Returning
+	   here instead left the previous colour on the canvas, so pressing a swatch
+	   before the first Preview - or after one was thrown away - did nothing
+	   visible and read as a broken button. */
+	const cv = $( 'pv' );
+	const ctx = cv && cv.getContext ? cv.getContext( '2d' ) : null;
+
+	if ( ctx ) {
+		drawBackdrop( ctx, cv.width, cv.height );
 	}
 }
 
@@ -1048,7 +1086,7 @@ function aiUpscale() {
 			describeDoc();
 
 			/* The old preview was of the old pixels at the old size. */
-			lastPreview = null;
+			dropPreview();
 			say( 'pv-msg', 'Press Preview to see the upscaled layer.' );
 		} )
 		.catch( ( e ) => {

@@ -57,7 +57,10 @@ function defaults() {
 		lpi: 30,
 		angle: 22.5,
 		shape: 'round',
-		screenSource: 'dark',
+		/* Full colour, not one ink - see the note on defaults() in the
+		   website's dtx.js. `dark` thinned a saturated colour to a third of its
+		   dots on anything but a light garment. */
+		screenSource: 'colour',
 
 		inkEnabled: false,
 		ink: [ 0, 0, 0 ],
@@ -127,12 +130,16 @@ function autoInk( garment ) {
 	return luminance( garment ) > 0.5 ? [ 0, 0, 0 ] : [ 255, 255, 255 ];
 }
 
+/* Which screening modes genuinely reach into the engine for the garment
+   colour. Same list as the website's dtx.js. */
+var SCREEN_READS_GARMENT = { colour: true, garment: true };
+
 /**
- * The two colours the garment screening mode measures against.
+ * The colours the garment-aware screening modes measure against.
  *
  * The garment colour is preview only everywhere else and provably never
- * reaches the engine. This one mode is the exception and has to be: there is
- * no way to work out how much ink a pixel needs without knowing what it is
+ * reaches the engine. These two modes are the exception and have to be: there
+ * is no way to work out how much ink a pixel needs without knowing what it is
  * going down on to. Returning nulls in every other mode is what keeps that
  * promise true rather than merely usually true.
  *
@@ -140,11 +147,18 @@ function autoInk( garment ) {
  * folder compares the two rather than trusting this comment.
  */
 function screenColours( S ) {
-	if ( 'garment' !== S.screenSource || ! S.halftone ) {
+	if ( ! SCREEN_READS_GARMENT[ S.screenSource ] || ! S.halftone ) {
 		return { garment: null, ink: null };
 	}
 
 	var garment = S.shirt.slice();
+
+	/* The full colour mode has no single ink to aim at - each pixel's ink is
+	   that pixel - so it is handed the garment and no ink at all rather than an
+	   ink it would have to ignore. */
+	if ( 'colour' === S.screenSource ) {
+		return { garment: garment, ink: null };
+	}
 
 	return {
 		garment: garment,
@@ -519,6 +533,7 @@ module.exports = {
 	defaults: defaults,
 	ENGINE_KEYS: ENGINE_KEYS,
 	DERIVED_KEYS: DERIVED_KEYS,
+	SCREEN_READS_GARMENT: SCREEN_READS_GARMENT,
 	screenColours: screenColours,
 	autoInk: autoInk,
 	parseColour: parseColour,
