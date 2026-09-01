@@ -806,6 +806,77 @@ check( 'nor opened wider than the panel allows',
 check( 'a fractional pick is floored, the way the engine looks it up',
 	studio.clampSettings( Object.assign( studio.defaults(), { bandPick: 92.9 } ) ).bandPick === 92 );
 
+section( 'cleaning the edge colour' );
+
+/* A preset written before this setting existed has no key for it. Coming back
+   as `false` would silently reintroduce the halo on every old job, with nothing
+   on the panel to explain why the same file now prints differently. */
+const oldPreset = studio.defaults();
+delete oldPreset.bgDefringe;
+check( 'a preset saved before this existed comes back with it ON',
+	studio.clampSettings( oldPreset ).bgDefringe === true );
+
+check( 'an explicit off is respected',
+	studio.clampSettings( Object.assign( studio.defaults(), { bgDefringe: false } ) ).bgDefringe === false );
+
+check( 'and it is a real boolean, not a string, by the time the engine sees it',
+	studio.clampSettings( Object.assign( studio.defaults(), { bgDefringe: 'yes' } ) ).bgDefringe === true &&
+	studio.clampSettings( Object.assign( studio.defaults(), { bgDefringe: 0 } ) ).bgDefringe === false );
+
+check( 'the engine is actually sent it',
+	studio.ENGINE_KEYS.indexOf( 'bgDefringe' ) !== -1 &&
+	'bgDefringe' in studio.settingsForEngine( studio.clampSettings( studio.defaults() ) ) );
+
+/* The claim that matters, through the engine rather than the settings: with it
+   on, a pixel that is half logo and half white background comes back as the
+   logo's colour at half alpha, not as a pale opaque mix. */
+( function () {
+	const W = 24, H = 24, FG = [ 220, 30, 40 ], BG = [ 255, 255, 255 ];
+	const S = studio.settingsForEngine( studio.clampSettings( Object.assign(
+		studio.defaults(), { bgRemove: true, knockout: BG, bgTolerance: 12, bgSoftness: 6 }
+	) ) );
+
+	/* A square with one deliberately half-covered column down its left edge. */
+	function art() {
+		const d = new Uint8ClampedArray( W * H * 4 );
+
+		for ( let y = 0; y < H; y++ ) {
+			for ( let x = 0; x < W; x++ ) {
+				const i = ( y * W + x ) * 4;
+				let a = 0;
+
+				if ( y >= 4 && y < 20 ) {
+					if ( x === 5 ) { a = 0.5; } else if ( x > 5 && x < 19 ) { a = 1; }
+				}
+
+				d[ i ] = Math.round( FG[ 0 ] * a + BG[ 0 ] * ( 1 - a ) );
+				d[ i + 1 ] = Math.round( FG[ 1 ] * a + BG[ 1 ] * ( 1 - a ) );
+				d[ i + 2 ] = Math.round( FG[ 2 ] * a + BG[ 2 ] * ( 1 - a ) );
+				d[ i + 3 ] = 255;
+			}
+		}
+
+		return d;
+	}
+
+	const at = ( ( 12 * W ) + 5 ) * 4;
+
+	const on = art();
+	engine.run( on, W, H, Object.assign( {}, S, { bgDefringe: true } ), 1 );
+
+	const off = art();
+	engine.run( off, W, H, Object.assign( {}, S, { bgDefringe: false } ), 1 );
+
+	check( 'without it the half covered pixel stays a pale opaque mix',
+		off[ at + 3 ] === 255 && off[ at + 1 ] > 130,
+		'rgb ' + off[ at ] + ',' + off[ at + 1 ] + ',' + off[ at + 2 ] + ' alpha ' + off[ at + 3 ] );
+
+	check( 'with it the half covered pixel is the ink at half alpha',
+		Math.abs( on[ at ] - FG[ 0 ] ) <= 6 && Math.abs( on[ at + 1 ] - FG[ 1 ] ) <= 6 &&
+		Math.abs( on[ at + 2 ] - FG[ 2 ] ) <= 6 && Math.abs( on[ at + 3 ] - 128 ) <= 6,
+		'rgb ' + on[ at ] + ',' + on[ at + 1 ] + ',' + on[ at + 2 ] + ' alpha ' + on[ at + 3 ] );
+} )();
+
 /* ------------------------------------------------------------------ */
 
 Promise.all( run ).then( () => {
@@ -813,8 +884,8 @@ Promise.all( run ).then( () => {
 
 	/* A floor. A test file that stops running looks exactly like one that
 	   passes, and this one is full of async blocks that could silently vanish. */
-	if ( total < 160 ) {
-		fails.push( 'only ' + total + ' checks ran, expected at least 160' );
+	if ( total < 166 ) {
+		fails.push( 'only ' + total + ' checks ran, expected at least 166' );
 	}
 
 	console.log( '\n' + ( fails.length ? fails.length + ' FAILED of ' + total : 'ALL ' + ok + ' PASSED' ) );

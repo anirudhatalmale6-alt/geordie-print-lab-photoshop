@@ -51,6 +51,7 @@ function defaults() {
 		bgRemove: false,
 		bgTolerance: 12,
 		bgSoftness: 6,
+		bgDefringe: true,
 
 		halftone: false,
 		lpi: 30,
@@ -91,7 +92,7 @@ var ENGINE_KEYS = [
 	'lightRed', 'lightYellow', 'lightGreen', 'lightCyan', 'lightBlue', 'lightMagenta',
 	'bandPick', 'bandPickWidth', 'lightPick',
 	'knockout',
-	'bgRemove', 'bgTolerance', 'bgSoftness',
+	'bgRemove', 'bgTolerance', 'bgSoftness', 'bgDefringe',
 	'halftone', 'lpi', 'angle', 'shape', 'screenSource',
 	'screenGarment', 'screenInk',
 	'inkEnabled', 'ink',
@@ -187,6 +188,14 @@ function clampSettings( S ) {
 	out.inGamma = Math.min( 9.99, Math.max( 0.01, Number( out.inGamma ) || 1 ) );
 	out.bgTolerance = Math.min( 255, Math.max( 0, Number( out.bgTolerance ) || 0 ) );
 	out.bgSoftness = Math.min( 255, Math.max( 0, Number( out.bgSoftness ) || 0 ) );
+
+	/* A tick box, so anything that is not plainly false means on. A preset
+	   written before this existed has no key at all, and `undefined` there has
+	   to come back as the default rather than as off - a file reopened with the
+	   edge cleaning silently switched off would print the halo again with
+	   nothing on screen to say why. */
+	out.bgDefringe = ( 'undefined' === typeof out.bgDefringe || null === out.bgDefringe ) ?
+		true : !! out.bgDefringe;
 	out.microDot = Math.min( 10, Math.max( 0, Number( out.microDot ) || 0 ) );
 	out.cleanupIntensity = Math.min( 10, Math.max( 0, Number( out.cleanupIntensity ) || 0 ) );
 	out.choke = Math.min( 20, Math.max( 0, Number( out.choke ) || 0 ) );

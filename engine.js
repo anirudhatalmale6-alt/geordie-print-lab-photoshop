@@ -495,35 +495,241 @@
 	 * Drop every pixel close to the knockout colour. Tolerance is a percentage
 	 * of the longest possible RGB distance, and there is a soft band above it
 	 * so edges do not come out with a hard jaggy fringe.
+	 *
+	 * WHAT THE SOFT BAND DOES NOT FIX
+	 *
+	 * An antialiased edge pixel is not a faint bit of the logo. It is a MIX of
+	 * the logo and whatever the logo was sitting on when the file was flattened,
+	 * and by the time it arrives here there is no alpha left saying so. Lowering
+	 * its alpha decides how much of it survives; it does nothing about the fact
+	 * that its RGB is still part background.
+	 *
+	 * Measured on a red disc antialiased onto white: a pixel that is 31% logo
+	 * comes out as 244,185,188 - pale pink - at alpha 255, because 31% of the
+	 * way from white to red is far enough from white to clear the tolerance
+	 * outright. Composited onto a navy tee that is 158 of 255 away from what it
+	 * should be. That pale ring is the "cut out in Paint" look, and on DTF it is
+	 * worse than on screen because the white underbase goes down under it too.
+	 *
+	 * `defringe` unmixes instead. For each rim pixel it finds what the artwork's
+	 * own solid colour is just inside the edge, works out what fraction of the
+	 * pixel that colour can account for, and hands back that colour at that
+	 * alpha - which is what the pixel meant in the first place.
 	 */
-	function removeBackground( data, knock, tolerance, softness ) {
+	function removeBackground( data, knock, tolerance, softness, defringe, w, h ) {
 		var kr = knock[ 0 ];
 		var kg = knock[ 1 ];
 		var kb = knock[ 2 ];
 		var maxDist = Math.sqrt( 3 * 255 * 255 );
 		var hard = ( tolerance / 100 ) * maxDist;
 		var soft = hard + ( softness / 100 ) * maxDist;
-		var i, dr, dg, db, dist, t;
+		var n = data.length >> 2;
+		var i, p, dr, dg, db, dist, t;
 
 		if ( soft <= hard ) {
 			soft = hard + 0.0001;
 		}
 
-		for ( i = 0; i < data.length; i += 4 ) {
-			if ( data[ i + 3 ] === 0 ) {
-				continue;
-			}
+		/* How far every pixel sits from the knockout colour. Needed twice over
+		   when defringing - once to decide the pixel, once to decide whether its
+		   neighbours are solid enough to be asked what colour it should be. */
+		var dists = new Float32Array( n );
 
+		for ( p = 0; p < n; p++ ) {
+			i = p << 2;
 			dr = data[ i ] - kr;
 			dg = data[ i + 1 ] - kg;
 			db = data[ i + 2 ] - kb;
-			dist = Math.sqrt( dr * dr + dg * dg + db * db );
+			dists[ p ] = Math.sqrt( dr * dr + dg * dg + db * db );
+		}
 
-			if ( dist <= hard ) {
-				data[ i + 3 ] = 0;
-			} else if ( dist < soft ) {
-				t = ( dist - hard ) / ( soft - hard );
-				data[ i + 3 ] = clamp255( Math.round( data[ i + 3 ] * t ) );
+		if ( ! defringe || ! w || ! h ) {
+			for ( p = 0; p < n; p++ ) {
+				i = p << 2;
+
+				if ( data[ i + 3 ] === 0 ) {
+					continue;
+				}
+
+				dist = dists[ p ];
+
+				if ( dist <= hard ) {
+					data[ i + 3 ] = 0;
+				} else if ( dist < soft ) {
+					t = ( dist - hard ) / ( soft - hard );
+					data[ i + 3 ] = clamp255( Math.round( data[ i + 3 ] * t ) );
+				}
+			}
+
+			return;
+		}
+
+		/*
+		 * Which pixels are far enough from the background to be believed, and
+		 * which of those are deep enough inside the shape to be believed as a
+		 * PURE colour.
+		 *
+		 * The difference matters: a 31%-coverage rim pixel is "far from the
+		 * background" too, and if it were allowed to answer the question it
+		 * would nominate itself and nothing would change. So interior means far
+		 * from the background AND with nothing near the background within reach
+		 * - an erosion, done as a separable minimum so it stays linear.
+		 */
+		var R = 2;
+		var far = new Uint8Array( n );
+
+		for ( p = 0; p < n; p++ ) {
+			far[ p ] = dists[ p ] >= soft ? 1 : 0;
+		}
+
+		var rowMin = new Uint8Array( n );
+		var x, y, k, min;
+
+		for ( y = 0; y < h; y++ ) {
+			for ( x = 0; x < w; x++ ) {
+				min = 1;
+
+				for ( k = -R; k <= R; k++ ) {
+					if ( x + k < 0 || x + k >= w || ! far[ y * w + x + k ] ) {
+						min = 0;
+						break;
+					}
+				}
+
+				rowMin[ y * w + x ] = min;
+			}
+		}
+
+		var inside = new Uint8Array( n );
+
+		for ( y = 0; y < h; y++ ) {
+			for ( x = 0; x < w; x++ ) {
+				min = 1;
+
+				for ( k = -R; k <= R; k++ ) {
+					if ( y + k < 0 || y + k >= h || ! rowMin[ ( y + k ) * w + x ] ) {
+						min = 0;
+						break;
+					}
+				}
+
+				inside[ y * w + x ] = min;
+			}
+		}
+
+		/*
+		 * Nearest solid colour to a rim pixel, searched ring by ring outwards so
+		 * the first one found is the closest. Only rim pixels ever ask, and the
+		 * rim is a perimeter rather than an area, so this stays cheap on a big
+		 * file.
+		 */
+		var SEARCH = 6;
+
+		function nearestSolid( cx, cy ) {
+			var r, dx, dy, nx, ny, q;
+
+			for ( r = 1; r <= SEARCH; r++ ) {
+				for ( dy = -r; dy <= r; dy++ ) {
+					for ( dx = -r; dx <= r; dx++ ) {
+						if ( Math.max( Math.abs( dx ), Math.abs( dy ) ) !== r ) {
+							continue;
+						}
+
+						nx = cx + dx;
+						ny = cy + dy;
+
+						if ( nx < 0 || ny < 0 || nx >= w || ny >= h ) {
+							continue;
+						}
+
+						q = ny * w + nx;
+
+						if ( inside[ q ] ) {
+							return q;
+						}
+					}
+				}
+			}
+
+			return -1;
+		}
+
+		var q, D, gate, a, fr, fg, fb;
+
+		for ( y = 0; y < h; y++ ) {
+			for ( x = 0; x < w; x++ ) {
+				p = y * w + x;
+				i = p << 2;
+
+				if ( data[ i + 3 ] === 0 ) {
+					continue;
+				}
+
+				dist = dists[ p ];
+
+				if ( dist <= hard ) {
+					data[ i + 3 ] = 0;
+					continue;
+				}
+
+				/* Deep inside the artwork: already a pure colour, nothing to
+				   unmix, and asking would only introduce error. */
+				if ( inside[ p ] ) {
+					continue;
+				}
+
+				q = nearestSolid( x, y );
+
+				if ( q < 0 ) {
+					/* No solid colour within reach - a thin stroke, a lone
+					   speck, or artwork softer than the search radius. Falling
+					   back to the plain behaviour is the honest answer: it
+					   leaves the pixel as it came rather than unmixing it
+					   against a colour that was never established. */
+					if ( dist < soft ) {
+						t = ( dist - hard ) / ( soft - hard );
+						data[ i + 3 ] = clamp255( Math.round( data[ i + 3 ] * t ) );
+					}
+
+					continue;
+				}
+
+				fr = data[ ( q << 2 ) ];
+				fg = data[ ( q << 2 ) + 1 ];
+				fb = data[ ( q << 2 ) + 2 ];
+				D = dists[ q ];
+
+				/* The artwork's own colour is barely further from the background
+				   than the tolerance is. There is no separation to recover here
+				   and dividing by it would amplify noise into confetti. */
+				if ( D <= hard + 1 ) {
+					continue;
+				}
+
+				/* How much of this pixel that solid colour accounts for. The
+				   tolerance and softness still get the last word, as a gate on
+				   top, so both sliders keep doing what they did. */
+				a = dist / D;
+
+				if ( a > 1 ) {
+					a = 1;
+				}
+
+				gate = dist >= soft ? 1 : ( dist - hard ) / ( soft - hard );
+				a *= gate;
+
+				if ( a <= 0 ) {
+					data[ i + 3 ] = 0;
+					continue;
+				}
+
+				/* P = a*F + (1-a)*K, so F = K + (P-K)/a. Clamped, because a
+				   pixel that picked up JPEG ringing can push a channel past the
+				   end of the scale. */
+				data[ i ] = clamp255( Math.round( kr + ( data[ i ] - kr ) / a ) );
+				data[ i + 1 ] = clamp255( Math.round( kg + ( data[ i + 1 ] - kg ) / a ) );
+				data[ i + 2 ] = clamp255( Math.round( kb + ( data[ i + 2 ] - kb ) / a ) );
+				data[ i + 3 ] = clamp255( Math.round( data[ i + 3 ] * a ) );
 			}
 		}
 	}
@@ -987,7 +1193,8 @@
 
 		// 2. Background removal, using the knockout colour from Shirt Color.
 		if ( s.bgRemove ) {
-			removeBackground( data, s.knockout, s.bgTolerance, s.bgSoftness );
+			removeBackground( data, s.knockout, s.bgTolerance, s.bgSoftness,
+				!! s.bgDefringe, w, h );
 		}
 
 		// 3. Halftone screen.

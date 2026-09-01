@@ -544,6 +544,28 @@ with sync_playwright() as p:
     check("sliding it back off switches the two sliders off again",
           pg.locator('[data-k="lightPick"]').is_disabled())
 
+    # --- cleaning the edge colour --------------------------------------
+    # It defaults ON, so the halo is fixed for someone who never finds the
+    # tick box. Both the box and the stored default are checked: a box that
+    # shows ticked while the default says otherwise is the failure worth
+    # catching, and neither one alone would catch it.
+    #
+    # What this does NOT re-prove is that the setting reaches the engine and
+    # changes the pixels - test/run.js does that directly, on a pixel whose
+    # true coverage is known. There is no live settings object on the window
+    # and it would be wrong to add one purely so this file could read it.
+    check("cleaning the edge colour is on to begin with",
+          pg.is_checked('[data-k="bgDefringe"]')
+          and pg.evaluate("() => require('studio.js').defaults().bgDefringe") is True)
+
+    pg.uncheck('[data-k="bgDefringe"]')
+    pg.wait_for_timeout(200)
+    check("and it can be turned off", not pg.is_checked('[data-k="bgDefringe"]'))
+
+    pg.check('[data-k="bgDefringe"]')
+    pg.wait_for_timeout(200)
+    check("and back on", pg.is_checked('[data-k="bgDefringe"]'))
+
     # Sign back in - the sign-out at the end of the previous block has not
     # happened yet, so the tool is still open.
     pg.select_option('[data-k="screenSource"]', "garment")
@@ -692,8 +714,8 @@ with sync_playwright() as p:
 
 httpd.shutdown()
 
-if oks + len(fails) < 70:
-    fails.append("only %d checks ran, expected at least 70" % (oks + len(fails)))
+if oks + len(fails) < 93:
+    fails.append("only %d checks ran, expected at least 93" % (oks + len(fails)))
 
 print("\n" + ("%d FAILED of %d" % (len(fails), oks + len(fails)) if fails else "PANEL: ALL %d PASSED" % oks))
 for f in fails:
